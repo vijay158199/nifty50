@@ -45,10 +45,15 @@ class Settings(BaseSettings):
     # match expectations. 5m does incidentally give a full 60-day backtest
     # window uniformly, since it survives Yahoo's rolling cutoff twice as
     # long as 1m does (60 days vs 30).
-    structure_interval: str = "5m"         # "1m" | "5m"
+    structure_interval: str = "5m"         # "1m" | "3m" | "5m"
     swing_fractal_window: int = 3          # bars either side for a fractal swing point
     require_smt_alignment: bool = False    # if True, SMT divergence is mandatory, not just supportive
-    entry_priority: tuple[str, ...] = ("CISD", "ORDER_BLOCK", "BREAKER_BLOCK", "GOLDEN_RATIO")
+    # CISD removed from the default priority (2026-08-02) - observed live to
+    # drag down win rate; matches an earlier backtest finding too (12.5% win
+    # rate on CISD trades vs 45%+ on Breaker Block, same sample). Zones are
+    # still built for it in entries.py (harmless/unused) so it can be added
+    # back by just editing this tuple if that ever changes.
+    entry_priority: tuple[str, ...] = ("ORDER_BLOCK", "BREAKER_BLOCK", "GOLDEN_RATIO")
     golden_ratio_low: float = 0.618
     golden_ratio_high: float = 0.705
     # Expressed in minutes (not bars) so it means the same thing regardless
