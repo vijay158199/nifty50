@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# local data - never commit trade history, secrets, or the session-signing key
+data/
+backend/.env
+.env
+
+# editor/OS cruft
+.vscode/
+.idea/
+Thumbs.db

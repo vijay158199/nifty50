@@ -1,0 +1,203 @@
+"""Entry timing detectors: CISD, Order Block, Breaker Block, Golden Ratio.
+
+All four operate on the "displacement leg" - the impulsive move that caused
+the structure break (MSS/CHOCH/BOS) - and look for price to retrace back
+into a zone before the move continues, which is where the actual entry is
+taken. Zones are computed once from data available at the structure-event
+bar (no look-ahead); the entry itself is found by scanning forward bar by
+bar for the first zone touched, in priority order.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import pandas as pd
+
+from app.config import settings
+from app.strategy.swings import confirmed_swings_as_of, last_swing
+from app.strategy.types import Direction, EntrySignal, EntryType, StructureEvent
+
+
+@dataclass
+class _Zone:
+    entry_type: EntryType
+    high: float
+    low: float
+    level: float  # the specific trigger price within/at the zone
+    reason: str
+
+
+@dataclass
+class EntryZones:
+    cisd: _Zone | None = None
+    order_block: _Zone | None = None
+    breaker_block: _Zone | None = None
+    golden_ratio: _Zone | None = None
+
+    def get(self, entry_type: EntryType) -> _Zone | None:
+        return {
+            EntryType.CISD: self.cisd,
+            EntryType.ORDER_BLOCK: self.order_block,
+            EntryType.BREAKER_BLOCK: self.breaker_block,
+            EntryType.GOLDEN_RATIO: self.golden_ratio,
+        }[entry_type]
+
+
+def _last_opposite_candle(displacement: pd.DataFrame, bullish_leg: bool) -> tuple[pd.Timestamp, pd.Series] | None:
+    """Last bearish candle in an up-leg (or bullish candle in a down-leg),
+    i.e. the candidate Order Block candle."""
+    for ts in reversed(displacement.index):
+        row = displacement.loc[ts]
+        is_bearish = row["Close"] < row["Open"]
+        if bullish_leg and is_bearish:
+            return ts, row
+        if not bullish_leg and not is_bearish:
+            return ts, row
+    return None
+
+
+def build_entry_zones(
+    candles_1m: pd.DataFrame,
+    event: StructureEvent,
+    window: int,
+) -> EntryZones | None:
+    """`candles_1m` must be the full 1m series (used both to find the leg's
+    origin swing and to look further back for a breaker candidate). `event`
+    carries the direction and the bar timestamp where structure broke."""
+    direction = event.direction
+    bullish = direction is Direction.BUY
+    origin_kind = "low" if bullish else "high"
+
+    event_index = candles_1m.index.get_loc(event.ts)
+    swings_before_event = confirmed_swings_as_of(candles_1m, window, max(event_index - 1, 0))
+    origin_swing = last_swing(swings_before_event, origin_kind)
+    if origin_swing is None:
+        return None
+
+    displacement = candles_1m.iloc[origin_swing.index : event_index + 1]
+    if displacement.empty:
+        return None
+
+    # For a bullish leg: origin is the low, extreme is the running high (and vice versa)
+    if bullish:
+        leg_low = float(origin_swing.price)
+        leg_high = float(displacement["High"].max())
+    else:
+        leg_high = float(origin_swing.price)
+        leg_low = float(displacement["Low"].min())
+
+    leg_range = leg_high - leg_low
+    if leg_range <= 0:
+        return None
+
+    zones = EntryZones()
+
+    # --- Order Block + CISD share the same candidate candle -----------------
+    candidate = _last_opposite_candle(displacement.iloc[:-1] if len(displacement) > 1 else displacement, bullish)
+    if candidate is not None:
+        ts, row = candidate
+        ob_high, ob_low = float(row["High"]), float(row["Low"])
+        zones.order_block = _Zone(
+            entry_type=EntryType.ORDER_BLOCK,
+            high=ob_high,
+            low=ob_low,
+            level=ob_high if bullish else ob_low,
+            reason=f"Order block from {'bearish' if bullish else 'bullish'} candle at {ts} "
+            f"({ob_low:.1f}-{ob_high:.1f})",
+        )
+        cisd_level = float(row["Open"])
+        zones.cisd = _Zone(
+            entry_type=EntryType.CISD,
+            high=cisd_level,
+            low=cisd_level,
+            level=cisd_level,
+            reason=f"CISD level (open of last opposite candle at {ts}) = {cisd_level:.1f}",
+        )
+
+    # --- Breaker block: look further back for an opposite-direction OB that
+    # the current displacement swept through -------------------------------
+    lookback_start = max(origin_swing.index - window * 6, 0)
+    prior_slice = candles_1m.iloc[lookback_start:origin_swing.index]
+    breaker_candidate = _last_opposite_candle(prior_slice, not bullish) if not prior_slice.empty else None
+    if breaker_candidate is not None:
+        ts, row = breaker_candidate
+        b_high, b_low = float(row["High"]), float(row["Low"])
+        swept = (leg_high > b_high) if bullish else (leg_low < b_low)
+        if swept:
+            zones.breaker_block = _Zone(
+                entry_type=EntryType.BREAKER_BLOCK,
+                high=b_high,
+                low=b_low,
+                level=b_high if bullish else b_low,
+                reason=f"Breaker block (failed {'bullish' if not bullish else 'bearish'} OB) at {ts} "
+                f"({b_low:.1f}-{b_high:.1f}), swept by displacement",
+            )
+
+    # --- Golden ratio retracement of the displacement leg -------------------
+    gr_low_pct, gr_high_pct = settings.golden_ratio_low, settings.golden_ratio_high
+    if bullish:
+        zone_top = leg_high - leg_range * gr_low_pct
+        zone_bottom = leg_high - leg_range * gr_high_pct
+    else:
+        zone_bottom = leg_low + leg_range * gr_low_pct
+        zone_top = leg_low + leg_range * gr_high_pct
+    zones.golden_ratio = _Zone(
+        entry_type=EntryType.GOLDEN_RATIO,
+        high=zone_top,
+        low=zone_bottom,
+        level=zone_top if bullish else zone_bottom,
+        reason=f"Golden ratio {gr_low_pct:.1%}-{gr_high_pct:.1%} retracement of leg "
+        f"{leg_low:.1f}-{leg_high:.1f} = zone {zone_bottom:.1f}-{zone_top:.1f}",
+    )
+
+    return zones
+
+
+def scan_for_entry(
+    candles_1m: pd.DataFrame,
+    event: StructureEvent,
+    zones: EntryZones,
+    priority: tuple[str, ...],
+    search_bar_limit: int,
+) -> EntrySignal | None:
+    """Scan forward from the structure-event bar for the first bar whose
+    range touches one of the candidate zones, in the configured priority
+    order. Returns the entry at the zone's trigger level."""
+    direction = event.direction
+    bullish = direction is Direction.BUY
+    event_index = candles_1m.index.get_loc(event.ts)
+    end = min(event_index + 1 + search_bar_limit, len(candles_1m))
+
+    for i in range(event_index + 1, end):
+        row = candles_1m.iloc[i]
+        ts = candles_1m.index[i]
+        bar_low, bar_high, bar_close = float(row["Low"]), float(row["High"]), float(row["Close"])
+
+        for name in priority:
+            entry_type = EntryType(name)
+            zone = zones.get(entry_type)
+            if zone is None:
+                continue
+
+            # All four concepts are treated as a zone/level that price must
+            # retrace back into before the entry is taken - this matters most
+            # for CISD, whose level sits below (BUY) / above (SELL) price
+            # right after the break: checking "close beyond the level" would
+            # be trivially true on the very next bar (price is already past
+            # it from the displacement itself) and fire an entry with no
+            # actual retracement, so we require a genuine touch instead.
+            triggered = bar_low <= zone.high and bar_high >= zone.low
+            entry_price = zone.level
+
+            if triggered:
+                return EntrySignal(
+                    entry_type=entry_type,
+                    direction=direction,
+                    entry_time=ts,
+                    entry_price=entry_price,
+                    reason=zone.reason,
+                    zone_high=zone.high,
+                    zone_low=zone.low,
+                )
+
+    return None

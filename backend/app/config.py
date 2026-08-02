@@ -1,0 +1,128 @@
+"""Central configuration for the strategy system.
+
+All tunables live here so the engine, backtester, live monitor and
+dashboard share a single source of truth. Values can be overridden via
+environment variables (or a .env file) using the ``NIFTY_`` prefix, e.g.
+``NIFTY_CAPITAL=200000``.
+"""
+import os
+import secrets
+from pathlib import Path
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = BACKEND_DIR.parent
+DATA_DIR = PROJECT_ROOT / "data"
+REPORTS_DIR = DATA_DIR / "reports"
+SNAPSHOTS_DIR = DATA_DIR / "snapshots"
+LOGS_DIR = DATA_DIR / "logs"
+DB_PATH = DATA_DIR / "nifty_strategy.db"
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="NIFTY_", env_file=".env", extra="ignore")
+
+    # --- Instruments -------------------------------------------------
+    primary_symbol: str = "^NSEI"          # NIFTY 50 index (yfinance ticker)
+    primary_label: str = "NIFTY 50"
+    confirm_symbol: str = "^NSEBANK"       # BANKNIFTY, used only for SMT divergence
+    confirm_label: str = "BANKNIFTY"
+
+    # --- Session (IST) -------------------------------------------------
+    session_start: str = "09:15"
+    session_end: str = "15:30"
+    first_candle_minutes: int = 30
+    timezone: str = "Asia/Kolkata"
+
+    # --- Strategy parameters -------------------------------------------
+    # Structure/entry/exit granularity below the 30m liquidity levels.
+    # Set to 5m per explicit user preference - NOTE: a 60-day backtest
+    # comparison (2026-08-01) actually showed 1m outperforming 5m (48.6%
+    # win / +217pts vs 31.6% win / -15pts on the same window), so this is
+    # not backed by the available evidence. Revisit if live results don't
+    # match expectations. 5m does incidentally give a full 60-day backtest
+    # window uniformly, since it survives Yahoo's rolling cutoff twice as
+    # long as 1m does (60 days vs 30).
+    structure_interval: str = "5m"         # "1m" | "5m"
+    swing_fractal_window: int = 3          # bars either side for a fractal swing point
+    require_smt_alignment: bool = False    # if True, SMT divergence is mandatory, not just supportive
+    entry_priority: tuple[str, ...] = ("CISD", "ORDER_BLOCK", "BREAKER_BLOCK", "GOLDEN_RATIO")
+    golden_ratio_low: float = 0.618
+    golden_ratio_high: float = 0.705
+    # Expressed in minutes (not bars) so it means the same thing regardless
+    # of structure_interval - a bar count would silently mean 5x more real
+    # time at 5m than at 1m.
+    entry_search_minutes: int = 180        # stop looking for an entry after this many minutes from trigger
+
+    # --- Risk management -------------------------------------------------
+    stop_loss_points: float = 15.0
+    take_profit_points: float = 30.0
+    account_capital: float = 100_000.0
+    risk_pct_per_trade: float = 1.0        # percent of capital risked per trade
+    lot_size: int = 75                     # NIFTY point value per lot
+
+    # --- Data ------------------------------------------------------------
+    yfinance_1m_lookback_days: int = 30    # Yahoo hard limit for 1m candles (only relevant if structure_interval="1m")
+    yfinance_5m_lookback_days: int = 60    # Yahoo hard limit for 5m candles (30m candles are derived from these)
+    candle_cache_ttl_minutes: int = 5
+    backtest_lookback_days: int = 60
+
+    # --- Live monitor / scheduler ----------------------------------------
+    poll_interval_seconds: int = 60
+    daily_report_time: str = "17:00"       # IST, matches the spec's 5 PM run
+    max_fetch_retries: int = 3
+
+    # --- Auth (single local user) -----------------------------------------
+    # Override both via env / fly secrets (NIFTY_AUTH_USERNAME / NIFTY_AUTH_PASSWORD) -
+    # this is a local single-user gate, not multi-tenant auth. MUST be
+    # overridden before deploying publicly - the defaults are not secret.
+    auth_username: str = "vijay"
+    auth_password: str = "changeme123"
+
+    # --- Paths -------------------------------------------------------------
+    data_dir: Path = DATA_DIR
+    reports_dir: Path = REPORTS_DIR
+    snapshots_dir: Path = SNAPSHOTS_DIR
+    logs_dir: Path = LOGS_DIR
+    db_path: Path = DB_PATH
+
+    @field_validator("risk_pct_per_trade")
+    @classmethod
+    def _risk_in_range(cls, v: float) -> float:
+        if not (0 < v <= 100):
+            raise ValueError("risk_pct_per_trade must be between 0 and 100")
+        return v
+
+    @field_validator("account_capital")
+    @classmethod
+    def _capital_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("account_capital must be positive")
+        return v
+
+    def ensure_dirs(self) -> None:
+        for d in (self.data_dir, self.reports_dir, self.snapshots_dir, self.logs_dir):
+            d.mkdir(parents=True, exist_ok=True)
+
+
+settings = Settings()
+settings.ensure_dirs()
+
+
+def get_session_secret() -> str:
+    """A signing key for the login session cookie. Persisted to a local file
+    (on the persistent volume in production) so sessions survive process
+    restarts, rather than regenerated (and thus invalidated) every time the
+    server boots. Can also be pinned via NIFTY_SESSION_SECRET so it survives
+    even a fresh volume."""
+    env_secret = os.environ.get("NIFTY_SESSION_SECRET")
+    if env_secret:
+        return env_secret
+    secret_path = DATA_DIR / ".session_secret"
+    if secret_path.exists():
+        return secret_path.read_text().strip()
+    secret = secrets.token_hex(32)
+    secret_path.write_text(secret)
+    return secret
