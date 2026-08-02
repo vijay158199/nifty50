@@ -33,7 +33,15 @@ class Settings(BaseSettings):
     # --- Session (IST) -------------------------------------------------
     session_start: str = "09:15"
     session_end: str = "15:30"
-    first_candle_minutes: int = 30
+    # Size of the "first candle" whose high/low defines the day's liquidity
+    # levels. Changed from 30 to 60 (2026-08-02) after a local A/B backtest
+    # on the same ~2-month window: 30min gave 26.3% win/-60pts, 60min gave
+    # 47.1% win/+105pts AND halved max drawdown (90->45pts) - the only
+    # tested lever (vs. R:R ratio, entry-type isolation) that improved
+    # multiple metrics together rather than trading one off against another.
+    # Still a small sample (17 trades) - worth confirming against live
+    # results over time, not just this one backtest window.
+    first_candle_minutes: int = 60
     timezone: str = "Asia/Kolkata"
 
     # --- Strategy parameters -------------------------------------------

@@ -108,7 +108,7 @@ def render_trade_snapshot(result: TradeResult, candles_fine: pd.DataFrame) -> st
             zorder=0,
         )
         ax.text(
-            0, result.trigger.first_candle_high, " 30m liquidity ",
+            0, result.trigger.first_candle_high, f" {settings.first_candle_minutes}m liquidity ",
             fontsize=7, color="#64748b", va="bottom", ha="left",
         )
 

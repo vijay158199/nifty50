@@ -1,12 +1,14 @@
 """Orchestrates the full pipeline for a single trading day:
 
-  30m first-candle -> first liquidity interaction (high or low touched),
-  detected on `settings.structure_interval` candles (5m by default - found
-  to produce cleaner signals than 1m, with less noise)
+  settings.first_candle_minutes first-candle (60m by default - see that
+  setting's comment for why) -> first liquidity interaction (high or low
+  touched), detected on `settings.structure_interval` candles (5m by
+  default - found to produce cleaner signals than 1m, with less noise)
     -> structure on the same interval (BOS = continuation, CHOCH = reversal)
       derives direction
       -> SMT divergence check (supportive by default, mandatory if configured)
-        -> entry timing (CISD / Order Block / Breaker Block / Golden Ratio)
+        -> entry timing (settings.entry_priority, e.g. Order Block / Breaker
+          Block / Golden Ratio / CISD - first zone touched wins)
           -> fixed 15/30 point risk management + position sizing
             -> exit simulation (SL/TP walk-forward on the same candles)
 
@@ -57,11 +59,13 @@ def run_day(
                           reduced_resolution=reduced_resolution)
     search_bar_limit = max(1, settings.entry_search_minutes // candle_interval_minutes)
 
-    # --- Stage 1: first 1m interaction with the first 30m candle's liquidity ---
+    # --- Stage 1: first structure-interval interaction with the first candle's liquidity ---
     trigger = find_trigger(primary_30m, primary_1m, candle_minutes=settings.first_candle_minutes)
     if trigger is None:
         result.status = TradeStatus.NO_SETUP
-        result.notes.append("Neither the first 30m candle's high nor low was touched during the session.")
+        result.notes.append(
+            f"Neither the first {settings.first_candle_minutes}m candle's high nor low was touched during the session."
+        )
         return result
     result.trigger = trigger
 

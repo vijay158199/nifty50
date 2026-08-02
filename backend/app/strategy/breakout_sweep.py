@@ -1,10 +1,11 @@
-"""Detects the first 30-minute candle of the session, then the first
-interaction (by 1-minute price action, not waiting on a 30-min candle to
-close) with either of that candle's liquidity levels - its high or its low.
+"""Detects the first candle of the session (settings.first_candle_minutes -
+60m by default), then the first interaction (by settings.structure_interval
+price action, not waiting on another first-candle-length bar to close) with
+either of that candle's liquidity levels - its high or its low.
 
 This does NOT decide a trade direction. It only flags WHICH level was
 touched first; whether that resolves into a bullish or bearish trade is
-determined afterward by 1-minute market structure (BOS/CHOCH - see
+determined afterward by market structure (BOS/CHOCH - see
 structure.detect_bos_choch)."""
 from __future__ import annotations
 
