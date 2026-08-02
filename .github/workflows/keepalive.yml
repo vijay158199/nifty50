@@ -1,0 +1,23 @@
+name: Keep Render service awake
+
+# Render's free tier sleeps after 15 minutes with no incoming requests, and
+# the in-process scheduler (live poll every 60s + the 17:00 IST daily
+# report) stops running while asleep. This pings the site every 5 minutes
+# during the window that actually matters - a bit before market open
+# through just after the 17:00 IST report job - so it never has 15 idle
+# minutes in a row and never sleeps mid-session.
+#
+# 09:00-17:10 IST == 03:30-11:40 UTC. GitHub Actions cron is UTC and only
+# supports whole-hour ranges, so 3-11 (03:00-11:59 UTC) covers it with a
+# little padding on both ends - harmless, just a few extra pings.
+on:
+  schedule:
+    - cron: "*/5 3-11 * * 1-5"
+  workflow_dispatch: {} # lets you trigger it manually from the Actions tab too
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping dashboard
+        run: curl -sS -o /dev/null -w "status: %{http_code}\n" --max-time 30 https://nifty50-dashboard-5g20.onrender.com/login
