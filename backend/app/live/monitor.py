@@ -28,33 +28,61 @@ _TERMINAL_STATUSES = {
 }
 
 
+def _day_bounds(trade_date: dt.date) -> tuple[dt.datetime, dt.datetime]:
+    """Full-day range as real datetimes, not a bare date. An exact equality
+    comparison (Trade.trade_date == some_date) was found to silently never
+    match against the DateTime column on the deployed (Turso/libsql) DB -
+    every single poll inserted a fresh row instead of updating the existing
+    one, producing 169 duplicate rows for one day. A range comparison with
+    unambiguous datetime bounds sidesteps whatever date/datetime coercion
+    difference caused that, on any backend."""
+    start = dt.datetime.combine(trade_date, dt.time.min)
+    end = dt.datetime.combine(trade_date, dt.time.max)
+    return start, end
+
+
 def _upsert_today_trade(row: dict, trade_date: dt.date) -> None:
     """There is at most one Trade row per (source="live", trade_date) - it
     gets replaced as the day's setup evolves (NO_SETUP -> AWAITING_ENTRY ->
-    OPEN -> TARGET_HIT/STOP_HIT/MANUAL_EXIT)."""
+    OPEN -> TARGET_HIT/STOP_HIT/MANUAL_EXIT). Self-healing: if more than one
+    row is somehow already present for the day (e.g. leftover duplicates
+    from before this fix), keeps only the newest and deletes the rest
+    instead of erroring."""
+    start, end = _day_bounds(trade_date)
     with get_session() as session:
-        existing = session.execute(
-            select(Trade).where(Trade.source == "live", Trade.trade_date == trade_date)
-        ).scalar_one_or_none()
-        if existing is None:
+        matches = session.execute(
+            select(Trade)
+            .where(Trade.source == "live", Trade.trade_date >= start, Trade.trade_date <= end)
+            .order_by(Trade.id.desc())
+        ).scalars().all()
+        if not matches:
             session.add(Trade(**row))
-        else:
-            for key, value in row.items():
-                setattr(existing, key, value)
+            return
+        existing, *stale = matches
+        for key, value in row.items():
+            setattr(existing, key, value)
+        for extra in stale:
+            session.delete(extra)
 
 
 def _record_heartbeat(trade_date: dt.date, status: str, detail: str | None = None) -> None:
+    start, end = _day_bounds(trade_date)
     with get_session() as session:
-        existing = session.execute(
-            select(LiveHeartbeat).where(LiveHeartbeat.trade_date == trade_date)
-        ).scalar_one_or_none()
+        matches = session.execute(
+            select(LiveHeartbeat)
+            .where(LiveHeartbeat.trade_date >= start, LiveHeartbeat.trade_date <= end)
+            .order_by(LiveHeartbeat.id.desc())
+        ).scalars().all()
         now = dt.datetime.utcnow()
-        if existing is None:
+        if not matches:
             session.add(LiveHeartbeat(trade_date=trade_date, last_poll_at=now, status=status, detail=detail))
-        else:
-            existing.last_poll_at = now
-            existing.status = status
-            existing.detail = detail
+            return
+        existing, *stale = matches
+        existing.last_poll_at = now
+        existing.status = status
+        existing.detail = detail
+        for extra in stale:
+            session.delete(extra)
 
 
 def poll_once(trade_date: dt.date | None = None) -> dict:
@@ -112,8 +140,11 @@ def finalize_daily_report(trade_date: dt.date | None = None) -> str | None:
 
     poll_once(trade_date)
 
+    start, end = _day_bounds(trade_date)
     with get_session() as session:
-        trades = session.execute(select(Trade).where(Trade.source == "live", Trade.trade_date == trade_date)).scalars().all()
+        trades = session.execute(
+            select(Trade).where(Trade.source == "live", Trade.trade_date >= start, Trade.trade_date <= end)
+        ).scalars().all()
         rows = [
             {c.name: getattr(t, c.name) for c in t.__table__.columns}
             for t in trades

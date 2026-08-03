@@ -33,7 +33,7 @@ from app.strategy import structure as structure_mod
 from app.strategy.breakout_sweep import find_trigger
 from app.strategy.risk import build_risk_plan
 from app.strategy.smt import check_smt_divergence
-from app.strategy.types import Direction, TradeResult, TradeStatus
+from app.strategy.types import Direction, StructureType, TradeResult, TradeStatus
 
 
 def run_day(
@@ -93,6 +93,13 @@ def run_day(
     if structure_event is None:
         result.status = TradeStatus.NO_SETUP
         result.notes.append("No BOS/CHOCH resolved the liquidity interaction within the search window.")
+        return result
+    if settings.require_choch_only and structure_event.structure_type is not structure_mod.StructureType.CHOCH:
+        result.status = TradeStatus.NO_SETUP
+        result.notes.append(
+            f"{structure_event.signal_label} resolved the liquidity interaction, but only CHOCH "
+            "setups are traded per config; setup rejected."
+        )
         return result
     result.structure = structure_event
     result.direction = structure_event.direction

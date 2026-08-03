@@ -39,7 +39,10 @@ def get_live_trades(
             stmt = stmt.where(Trade.entry_type == entry_type)
         if status:
             stmt = stmt.where(Trade.status == status)
-        stmt = stmt.order_by(desc(Trade.trade_date)).limit(limit)
+        # secondary sort on id: trade_date alone is a tie among every row for
+        # the same day, and ties need a deterministic winner (the newest
+        # row) rather than whatever order SQLite happens to return them in.
+        stmt = stmt.order_by(desc(Trade.trade_date), desc(Trade.id)).limit(limit)
         rows = session.execute(stmt).scalars().all()
     return [_row_to_dict(t) for t in rows]
 
@@ -71,10 +74,18 @@ def get_equity_curve(limit_days: int = 90) -> list[dict]:
 
 def get_heartbeat(day: dt.date | None = None) -> dict | None:
     day = day or now_ist().date()
+    # Range, not exact equality: comparing a bare date against this
+    # DateTime column via == was found to never match (confirmed on both
+    # local SQLite and the deployed Turso DB) - this function silently
+    # returned None for "today" every time before this fix.
+    start = dt.datetime.combine(day, dt.time.min)
+    end = dt.datetime.combine(day, dt.time.max)
     with get_session() as session:
         hb = session.execute(
-            select(LiveHeartbeat).where(LiveHeartbeat.trade_date == day)
-        ).scalar_one_or_none()
+            select(LiveHeartbeat)
+            .where(LiveHeartbeat.trade_date >= start, LiveHeartbeat.trade_date <= end)
+            .order_by(desc(LiveHeartbeat.id))
+        ).scalars().first()
     if hb is None:
         return None
     return {"trade_date": hb.trade_date, "last_poll_at": hb.last_poll_at, "status": hb.status, "detail": hb.detail}

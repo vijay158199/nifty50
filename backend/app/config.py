@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     structure_interval: str = "5m"         # "1m" | "3m" | "5m"
     swing_fractal_window: int = 3          # bars either side for a fractal swing point
     require_smt_alignment: bool = False    # if True, SMT divergence is mandatory, not just supportive
+    # If True, BOS-classified setups (continuation) are rejected as
+    # NO_SETUP - only CHOCH (reversal) setups are ever traded.
+    require_choch_only: bool = False
     # CISD removed from the default priority (2026-08-02) - observed live to
     # drag down win rate; matches an earlier backtest finding too (12.5% win
     # rate on CISD trades vs 45%+ on Breaker Block, same sample). Zones are
