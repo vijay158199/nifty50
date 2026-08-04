@@ -36,7 +36,10 @@
           </div>
         {% else %}&mdash;{% endif %}
       </td>
-      <td>{{ m.status_pill(t.status) }}</td>
+      <td>
+        {{ m.status_pill(t.status) }}
+        {% if t.setup_notes %}<div class="setup-note-inline" title="{{ t.setup_notes }}">{{ t.setup_notes }}</div>{% endif %}
+      </td>
       <td>
         <button class="btn ghost small danger"
                 hx-delete="/trades/{{ t.id }}"

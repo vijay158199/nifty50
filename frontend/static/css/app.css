@@ -607,3 +607,13 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13px; min-
   .pipeline { flex-direction: column; }
   .pipeline-arrow { transform: rotate(90deg); align-self: center; padding: 2px 0; }
 }
+
+/* --- Inline "why it stopped" note under a status pill in a table row ------- */
+.setup-note-inline {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  max-width: 220px;
+  white-space: normal;
+  line-height: 1.3;
+}
