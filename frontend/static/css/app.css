@@ -554,3 +554,56 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13px; min-
 @supports (padding: max(0px)) {
   .sidebar { padding-left: max(14px, env(safe-area-inset-left)); }
 }
+
+/* ==========================================================================
+   Today's Setup Pipeline (Overview page) - Liquidity -> Structure -> Entry -> Outcome
+   ========================================================================== */
+.pipeline { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+.pipeline-stage {
+  flex: 1 1 140px;
+  min-width: 140px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.pipeline-stage.done { background: var(--status-good-wash); border-color: var(--status-good); }
+.pipeline-stage.current { background: var(--status-warning-wash); border-color: var(--status-warning); }
+.pipeline-stage.pending { opacity: 0.55; }
+.pipeline-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.pipeline-stage.done .pipeline-num { background: var(--status-good); border-color: var(--status-good); color: #fff; }
+.pipeline-stage.current .pipeline-num { background: var(--status-warning); border-color: var(--status-warning); color: #1a1304; }
+.pipeline-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+.pipeline-value { font-size: 13.5px; font-weight: 600; }
+.pipeline-detail { font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; }
+.pipeline-arrow {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 16px;
+  padding: 0 2px;
+}
+@media (max-width: 640px) {
+  .pipeline { flex-direction: column; }
+  .pipeline-arrow { transform: rotate(90deg); align-self: center; padding: 2px 0; }
+}

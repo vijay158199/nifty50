@@ -62,6 +62,67 @@
 <div class="card">
   <div class="card-header">
     <div>
+      <h2>Today's Setup Pipeline</h2>
+      <div class="card-sub">Where today's analysis actually stands, stage by stage</div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="pipeline">
+      <div class="pipeline-stage {{ 'done' if pipeline.reached >= 1 else ('current' if pipeline.reached == 0 else 'pending') }}">
+        <div class="pipeline-num">1</div>
+        <div class="pipeline-label">Liquidity</div>
+        {% if today_trade and today_trade.liquidity_side %}
+          <div class="pipeline-value">{{ today_trade.liquidity_side }} taken</div>
+          <div class="pipeline-detail">{{ today_trade.trigger_type or "-" }} &middot; {{ today_trade.trigger_time.strftime('%H:%M') if today_trade.trigger_time else "-" }}</div>
+        {% else %}
+          <div class="pipeline-value">Not yet</div>
+        {% endif %}
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-stage {{ 'done' if pipeline.reached >= 2 else ('current' if pipeline.reached == 1 else 'pending') }}">
+        <div class="pipeline-num">2</div>
+        <div class="pipeline-label">Structure</div>
+        {% if today_trade and today_trade.mss_choch_bos %}
+          <div class="pipeline-value">{{ today_trade.mss_choch_bos }} {{ (today_trade.liquidity_side or "").title() }}</div>
+          <div class="pipeline-detail">{{ today_trade.direction or "-" }}</div>
+        {% else %}
+          <div class="pipeline-value">Not yet</div>
+        {% endif %}
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-stage {{ 'done' if pipeline.reached >= 3 else ('current' if pipeline.reached == 2 else 'pending') }}">
+        <div class="pipeline-num">3</div>
+        <div class="pipeline-label">Entry</div>
+        {% if today_trade and today_trade.entry_type %}
+          <div class="pipeline-value">{{ today_trade.entry_type }}</div>
+          <div class="pipeline-detail">{{ "%.1f"|format(today_trade.entry_price) if today_trade.entry_price else "-" }}</div>
+        {% else %}
+          <div class="pipeline-value">Not yet</div>
+        {% endif %}
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-stage {{ 'done' if pipeline.reached >= 4 else ('current' if pipeline.reached == 3 else 'pending') }}">
+        <div class="pipeline-num">4</div>
+        <div class="pipeline-label">Outcome</div>
+        {% if today_trade and pipeline.reached == 4 %}
+          <div class="pipeline-value">{{ m.status_pill(today_trade.status) }}</div>
+          <div class="pipeline-detail">{{ m.pnl_span(today_trade.pnl_points) }} pts</div>
+        {% elif pipeline.reached == 3 %}
+          <div class="pipeline-value">{{ m.status_pill(today_trade.status) }}</div>
+        {% else %}
+          <div class="pipeline-value">Not yet</div>
+        {% endif %}
+      </div>
+    </div>
+    {% if pipeline.notes %}
+    <div class="note" style="margin-top: 14px;"><strong>Why it stopped here:</strong> {{ pipeline.notes }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <div>
       <h2>Live Monitor Control</h2>
       <div class="card-sub">
         {% if live_status.is_active_today %}

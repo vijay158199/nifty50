@@ -76,6 +76,7 @@ def overview(request: Request):
     heartbeat = queries.get_heartbeat()
     recent = queries.get_live_trades(limit=8)
     live_status = live_control.get_status()
+    pipeline = queries.get_pipeline_stage(today_trade)
 
     ctx = {
         "request": request,
@@ -86,6 +87,7 @@ def overview(request: Request):
         "heartbeat": heartbeat,
         "recent_trades": recent,
         "live_status": live_status,
+        "pipeline": pipeline,
     }
     return templates.TemplateResponse("overview.html", ctx)
 

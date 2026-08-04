@@ -41,6 +41,7 @@ class Trade(Base):
 
     trigger_time: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     trigger_type: Mapped[str | None] = mapped_column(String(16), nullable=True)  # BREAKOUT | SWEEP
+    liquidity_side: Mapped[str | None] = mapped_column(String(8), nullable=True)  # HIGH | LOW - which side of the first candle was taken
 
     entry_time: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     entry_price: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -66,6 +67,11 @@ class Trade(Base):
     snapshot_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     mss_choch_bos: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Human-readable reason(s) the pipeline stopped where it did (e.g. "No
+    # BOS/CHOCH resolved the liquidity interaction within the search
+    # window.") - engine.run_day always computes this (TradeResult.notes)
+    # but it was being silently dropped before reaching the DB/dashboard.
+    setup_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     smt_divergence: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)

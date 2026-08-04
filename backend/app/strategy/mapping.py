@@ -22,6 +22,7 @@ def trade_result_to_row(result: TradeResult, source: str, backtest_run_id: int |
         "direction": result.direction.value if result.direction else None,
         "trigger_time": trigger.trigger_time if trigger else None,
         "trigger_type": trigger.trigger_type.value if trigger else None,
+        "liquidity_side": trigger.liquidity_side.value if trigger else None,
         "entry_time": entry.entry_time if entry else None,
         "entry_price": entry.entry_price if entry else None,
         "entry_type": entry.entry_type.value if entry else None,
@@ -40,4 +41,5 @@ def trade_result_to_row(result: TradeResult, source: str, backtest_run_id: int |
         "snapshot_path": None,  # filled in after chart rendering
         "mss_choch_bos": structure.structure_type.value if structure else None,
         "smt_divergence": structure.smt_divergence if structure else False,
+        "setup_notes": " ".join(result.notes) if result.notes else None,
     }

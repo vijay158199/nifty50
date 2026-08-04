@@ -30,9 +30,15 @@ def get_live_trades(
     with get_session() as session:
         stmt = select(Trade).where(Trade.source == "live")
         if start:
-            stmt = stmt.where(Trade.trade_date >= start)
+            # datetime.min, not the bare date: a bare date binds as e.g.
+            # "2026-08-04" which is lexicographically LESS than the stored
+            # "2026-08-04 00:00:00.000000" (shorter string vs. its own
+            # prefix), so a bare-date upper bound silently excludes every
+            # row on that day - only >= happens to work by accident of
+            # string comparison, which is what let this hide until now.
+            stmt = stmt.where(Trade.trade_date >= dt.datetime.combine(start, dt.time.min))
         if end:
-            stmt = stmt.where(Trade.trade_date <= end)
+            stmt = stmt.where(Trade.trade_date <= dt.datetime.combine(end, dt.time.max))
         if direction:
             stmt = stmt.where(Trade.direction == direction)
         if entry_type:
@@ -51,6 +57,28 @@ def get_today_trade() -> dict | None:
     today = now_ist().date()
     trades = get_live_trades(start=today, end=today, limit=1)
     return trades[0] if trades else None
+
+
+_RESOLVED_STATUSES = {"TARGET_HIT", "STOP_HIT", "MANUAL_EXIT"}
+
+
+def get_pipeline_stage(trade: dict | None) -> dict:
+    """How far today's setup has actually progressed through the strategy's
+    4 stages (Liquidity -> Structure -> Entry -> Outcome), plus the engine's
+    own explanation for why it stopped where it did (TradeResult.notes,
+    persisted as setup_notes) - drives the Overview page's pipeline view."""
+    if trade is None:
+        return {"reached": 0, "notes": None}
+    reached = 0
+    if trade.get("trigger_time"):
+        reached = 1
+    if trade.get("mss_choch_bos"):
+        reached = 2
+    if trade.get("entry_type"):
+        reached = 3
+    if trade.get("status") in _RESOLVED_STATUSES:
+        reached = 4
+    return {"reached": reached, "notes": trade.get("setup_notes")}
 
 
 def get_live_stats() -> BacktestStats:
