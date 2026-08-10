@@ -8,10 +8,11 @@
       requiring a long-body confirmation candle by default (see
       structure.detect_bos_choch) - derives direction
       -> SMT divergence check (supportive by default, mandatory if configured)
-        -> entry timing (settings.entry_priority - Fair Value Gap by default,
-          entered at its 50% level or a deeper fill; Order Block / Breaker
-          Block / Golden Ratio / CISD zones are also built but unused unless
-          added back to the priority tuple - first zone touched wins)
+        -> entry timing (settings.entry_priority - Fair Value Gap, entered
+          at its 50% level or a deeper fill, plus Order Block / Breaker
+          Block / CISD as fallbacks by default; Golden Ratio is also built
+          but unused unless added to the priority tuple - first zone
+          touched, across all bars scanned, wins)
           -> fixed 15/30 point risk management + position sizing
             -> exit simulation (SL/TP walk-forward on the same candles)
 
