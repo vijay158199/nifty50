@@ -7,8 +7,7 @@ into a zone before the move continues, which is where the actual entry is
 taken. Zones are computed once from data available at the structure-event
 bar (no look-ahead); the entry itself is found by scanning forward bar by
 bar for the first zone touched, in priority order. Default priority
-(settings.entry_priority) is Fair Value Gap, Order Block, Breaker Block,
-then CISD - see _find_fvg for the FVG concept specifically.
+(settings.entry_priority) is Fair Value Gap only - see _find_fvg.
 """
 from __future__ import annotations
 

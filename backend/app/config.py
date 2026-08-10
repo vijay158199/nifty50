@@ -68,13 +68,15 @@ class Settings(BaseSettings):
     require_displacement_candle: bool = True
     displacement_lookback_bars: int = 20       # prior bars used for the average-body baseline
     displacement_body_multiplier: float = 1.5  # confirmation candle's body must be >= this x that average
-    # Entry model (2026-08-10, explicit user spec): Fair Value Gap (entered
-    # at its 50% CE level or deeper) plus Order Block / Breaker Block / CISD
-    # as fallbacks - whichever zone is touched on the earliest bar wins;
-    # this tuple's order only breaks ties when more than one zone is touched
-    # on the same bar. Golden Ratio is still built in entries.py
-    # (harmless/unused) so it can be added back by editing this tuple too.
-    entry_priority: tuple[str, ...] = ("FVG", "ORDER_BLOCK", "BREAKER_BLOCK", "CISD")
+    # Entry model (2026-08-10, explicit user spec): Fair Value Gap only -
+    # enter on retracement to the 50% (CE) level of the FVG or deeper.
+    # Order Block/Breaker Block/CISD/Golden Ratio were tried alongside FVG
+    # too (2026-08-10) - a 43-day backtest showed they crowd out FVG (their
+    # shallower zones almost always touch first) and drag win rate from
+    # 44.4% down to 38.5%, so FVG-only was kept. Zones for the others are
+    # still built in entries.py (harmless/unused) so they can be added back
+    # by editing this tuple if that ever changes.
+    entry_priority: tuple[str, ...] = ("FVG",)
     golden_ratio_low: float = 0.618
     golden_ratio_high: float = 0.705
     # Expressed in minutes (not bars) so it means the same thing regardless

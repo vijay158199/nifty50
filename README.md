@@ -13,9 +13,9 @@ monitor during market hours, a historical backtester, and a dashboard - all on y
 2. Find the first subsequent 30-minute candle that breaks out of, or sweeps the liquidity of, that first candle.
 3. Switch to the 1-minute chart and look for a Market Structure Shift / Change of Character / Break of
    Structure in the trigger's direction, plus an SMT divergence check against BANKNIFTY.
-4. Time the entry with the first of Fair Value Gap (50%/CE level or deeper), Order Block, Breaker Block,
-   or CISD retracement to be touched (priority order is configurable; Golden Ratio is also implemented
-   and can be re-enabled the same way).
+4. Time the entry with a Fair Value Gap retracement to its 50% (CE) level or deeper (other concepts -
+   CISD / Order Block / Breaker Block / Golden Ratio - are still implemented and can be re-enabled via
+   `entry_priority`, but aren't used by default - they underperformed in testing).
 5. Fixed risk: 15-point stop, 30-point target (1:2 R:R), with position size derived from your configured
    capital and risk-per-trade percentage.
 
@@ -112,7 +112,7 @@ in `backend/`. Key ones:
 | `risk_pct_per_trade` | 1.0 | % of capital risked per trade |
 | `lot_size` | 75 | Points-to-currency multiplier per lot |
 | `stop_loss_points` / `take_profit_points` | 15 / 30 | Fixed risk management |
-| `entry_priority` | FVG, ORDER_BLOCK, BREAKER_BLOCK, CISD | Order entries are checked in; FVG enters at the gap's 50% level or deeper |
+| `entry_priority` | FVG | Order entries are checked in; enters at the gap's 50% level or a deeper fill |
 | `require_displacement_candle` | True | Requires the BOS/CHOCH confirmation candle to have a long body (strong displacement) |
 | `require_smt_alignment` | False | If True, a setup is rejected without confirmed SMT divergence |
 | `poll_interval_seconds` | 60 | Live monitor polling cadence |
