@@ -98,7 +98,7 @@ class BacktestRun(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     start_date: Mapped[dt.date] = mapped_column(DateTime)
     end_date: Mapped[dt.date] = mapped_column(DateTime)
-    structure_interval: Mapped[str] = mapped_column(String(4), default="5m")  # "1m" | "3m" | "5m"
+    structure_interval: Mapped[str] = mapped_column(String(4), default="5m")  # "1m" | "2m" | "3m" | "5m"
     status: Mapped[str] = mapped_column(String(16), default="RUNNING")  # RUNNING|DONE|FAILED
     total_trades: Mapped[int] = mapped_column(Integer, default=0)
     winning_trades: Mapped[int] = mapped_column(Integer, default=0)
@@ -174,5 +174,5 @@ class LiveControl(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled_for_date: Mapped[dt.date | None] = mapped_column(DateTime, nullable=True)
-    structure_interval: Mapped[str] = mapped_column(String(4), default="5m")  # "1m" | "3m" | "5m" - live monitor's active timeframe
+    structure_interval: Mapped[str] = mapped_column(String(4), default="5m")  # "1m" | "2m" | "3m" | "5m" - live monitor's active timeframe
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)

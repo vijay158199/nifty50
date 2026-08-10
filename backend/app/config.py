@@ -46,13 +46,13 @@ class Settings(BaseSettings):
 
     # --- Strategy parameters -------------------------------------------
     # Structure/entry/exit granularity below the 60m liquidity levels.
-    # Fixed to 1m per explicit user spec (2026-08-10) - 3m/5m are no longer
-    # offered (see live.control.VALID_INTERVALS). NOTE: 1m candles are only
-    # available from Yahoo for the trailing ~30 days (settings.
-    # yfinance_1m_lookback_days), vs 5m's ~60 - backtests further back than
-    # that automatically fall back to 5m for those days (flagged
-    # reduced_resolution=True), same as before.
-    structure_interval: str = "1m"
+    # Default 1m; also selectable per live-session/backtest-run: 2m, 3m, 5m
+    # (see live.control.VALID_INTERVALS). NOTE: 1m/2m/3m all derive from
+    # Yahoo's 1m candles, only available for the trailing ~30 days
+    # (settings.yfinance_1m_lookback_days); 5m has its own ~60-day window.
+    # Backtests further back than a timeframe's window automatically fall
+    # back to 5m for those days (flagged reduced_resolution=True).
+    structure_interval: str = "1m"         # "1m" | "2m" | "3m" | "5m"
     swing_fractal_window: int = 3          # bars either side for a fractal swing point
     require_smt_alignment: bool = False    # if True, SMT divergence is mandatory, not just supportive
     # If True, BOS-classified setups (continuation) are rejected as

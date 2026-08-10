@@ -107,13 +107,13 @@ def get_candles(symbol: str, interval: str, start: dt.datetime, end: dt.datetime
     return fetch_and_cache(symbol, interval, start, end)
 
 
-INTERVAL_MINUTES = {"1m": 1, "3m": 3, "5m": 5}
+INTERVAL_MINUTES = {"1m": 1, "2m": 2, "3m": 3, "5m": 5}
 
 
 @dataclass
 class SessionData:
     fine: pd.DataFrame          # candles at the requested structure_interval (or a fallback) for the session
-    resolution: str             # "1m" | "3m" | "5m" - the resolution actually returned
+    resolution: str             # "1m" | "2m" | "3m" | "5m" - the resolution actually returned
     candles_30m: pd.DataFrame   # our own session-aligned 30m candles, derived from `fine`
     reduced_resolution: bool    # True when the requested structure_interval wasn't available and we fell back coarser
 
@@ -125,13 +125,13 @@ def get_session_data(symbol: str, date: dt.date, structure_interval: str | None 
     then derive session-aligned 30m candles ourselves (see resample.py for
     why we don't use Yahoo's native 30m bars).
 
-    Yahoo has no native 3-minute interval, so "3m" is derived by resampling
-    1-minute data ourselves (same technique as the 30m candles) - meaning
-    "3m" inherits 1m's ~30-day lookback window, not 5m's ~60-day one.
-    "1m" falls back to 5m for days outside that ~30-day window (5m's own
-    window is ~60 days, matching settings.backtest_lookback_days); this
-    fallback never applies to "5m" itself, since there's nothing coarser to
-    drop to."""
+    Yahoo only has native "1m" and "5m" intervals. Anything else ("2m",
+    "3m", ...) is derived by resampling 1-minute data ourselves (same
+    technique as the 30m candles) - meaning those interim intervals inherit
+    1m's ~30-day lookback window, not 5m's ~60-day one. Any non-"5m" request
+    falls back to 5m for days outside that ~30-day window (5m's own window
+    is ~60 days, matching settings.backtest_lookback_days); this fallback
+    never applies to "5m" itself, since there's nothing coarser to drop to."""
     requested = structure_interval or settings.structure_interval
     start, end = session_bounds(date)
     today = dt.datetime.now(IST).date()
@@ -140,7 +140,7 @@ def get_session_data(symbol: str, date: dt.date, structure_interval: str | None 
         reduced = False
         native_interval = "5m"
     else:
-        # "1m" and "3m" both need native 1m data as their base
+        # every other interval needs native 1m data as its base
         reduced = (today - date).days >= settings.yfinance_1m_lookback_days
         native_interval = "5m" if reduced else "1m"
 
@@ -151,16 +151,18 @@ def get_session_data(symbol: str, date: dt.date, structure_interval: str | None 
         native_interval = "5m"
         base = get_candles(symbol, native_interval, start, end)
 
-    if requested == "3m" and native_interval == "1m":
-        fine = resample_ohlc(base, 3, start)
-        fine = _drop_unclosed_candle(fine, 3)
-        resolution = "3m"
+    if requested not in ("1m", "5m") and native_interval == "1m":
+        minutes = INTERVAL_MINUTES[requested]
+        fine = resample_ohlc(base, minutes, start)
+        fine = _drop_unclosed_candle(fine, minutes)
+        resolution = requested
     else:
-        # either got exactly what was requested (1m or 5m), or wanted 3m
-        # but 1m wasn't available to derive it from - already flagged reduced
+        # either got exactly what was requested (1m or 5m), or wanted a
+        # derived interval but 1m wasn't available to derive it from -
+        # already flagged reduced
         fine = base
         resolution = native_interval
-        if requested == "3m" and native_interval == "5m":
+        if requested not in ("1m", "5m") and native_interval == "5m":
             reduced = True
 
     candles_30m = resample_ohlc(base, settings.first_candle_minutes, start)

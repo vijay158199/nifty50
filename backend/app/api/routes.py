@@ -116,7 +116,7 @@ def stop_live_monitoring():
 
 @router.post("/api/live/structure-interval")
 def set_live_structure_interval(interval: str = Form(...)):
-    """Changes the live monitor's structure/entry timeframe (1m/3m/5m).
+    """Changes the live monitor's structure/entry timeframe (1m/2m/3m/5m).
     Takes effect on the next poll - no restart needed."""
     live_control.set_structure_interval(interval)
     return {"structure_interval": interval}

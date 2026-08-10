@@ -19,9 +19,7 @@ from app.models.db import get_session
 from app.models.schema import LiveControl
 
 _ROW_ID = 1
-# 1m only, per explicit user spec (2026-08-10) - 3m/5m were previously
-# offered as selectable options but are no longer used anywhere.
-VALID_INTERVALS = ("1m",)
+VALID_INTERVALS = ("1m", "2m", "3m", "5m")
 
 
 def _as_date(value: dt.date | dt.datetime | None) -> dt.date | None:

@@ -36,7 +36,7 @@ def run_backtest(
     a "running" status page against immediately - so this function reuses it
     instead of creating a duplicate.
 
-    `structure_interval` ("1m"/"3m"/"5m") is explicit per-run rather than
+    `structure_interval` ("1m"/"2m"/"3m"/"5m") is explicit per-run rather than
     read from global settings, so two backtests with different timeframes
     can safely run concurrently (each in its own background thread) without
     one clobbering the other's config."""
