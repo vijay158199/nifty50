@@ -53,6 +53,41 @@ def test_build_entry_zones_produces_sane_bullish_zones():
     assert zones.breaker_block is not None
 
 
+def test_build_entry_zones_produces_a_fair_value_gap_zone_at_the_50pct_level():
+    # Within the displacement leg, bar idx2 (High=99) and bar idx4 (Low=101)
+    # form a bullish FVG (99 < 101) -> gap 99-101, midpoint 100. Entry zone
+    # should span [gap_low, midpoint] = [99, 100], not the whole gap, since
+    # the spec is "50% or a deeper fill", not a touch of the gap's near edge.
+    df = _bullish_fixture()
+    event = _make_event(df)
+
+    zones = entries_mod.build_entry_zones(df, event, window=1)
+
+    assert zones.fair_value_gap is not None
+    assert zones.fair_value_gap.low == 99.0
+    assert zones.fair_value_gap.high == 100.0
+    assert zones.fair_value_gap.level == 100.0
+
+
+def test_scan_for_entry_fires_fvg_only_at_50pct_or_deeper():
+    # bar 6: shallow pullback (low=100.5) touches the upper (near) half of
+    # the gap but not the 50% level (100.0) -> no entry yet. bar 7: deeper
+    # pullback (low=99.5) reaches the 50% level -> entry at 100.0.
+    df = _bullish_fixture([
+        (111, 111, 100.5, 105),
+        (105, 105, 99.5, 100),
+    ])
+    event = _make_event(df)
+    zones = entries_mod.build_entry_zones(df, event, window=1)
+
+    entry = entries_mod.scan_for_entry(df, event, zones, priority=("FVG",), search_bar_limit=10)
+
+    assert entry is not None
+    assert entry.entry_type.value == "FVG"
+    assert entry.entry_time == df.index[7]
+    assert entry.entry_price == 100.0
+
+
 def test_scan_for_entry_finds_first_zone_touched_in_priority_order():
     # bar 6: shallow pullback (low=109) touches nothing; bar 7: deeper
     # pullback (low=103) touches the OB zone [101,104] but not CISD (102).

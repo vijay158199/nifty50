@@ -4,11 +4,14 @@
   setting's comment for why) -> first liquidity interaction (high or low
   touched), detected on `settings.structure_interval` candles (5m by
   default - found to produce cleaner signals than 1m, with less noise)
-    -> structure on the same interval (BOS = continuation, CHOCH = reversal)
-      derives direction
+    -> structure on the same interval (BOS = continuation, CHOCH = reversal),
+      requiring a long-body confirmation candle by default (see
+      structure.detect_bos_choch) - derives direction
       -> SMT divergence check (supportive by default, mandatory if configured)
-        -> entry timing (settings.entry_priority, e.g. Order Block / Breaker
-          Block / Golden Ratio / CISD - first zone touched wins)
+        -> entry timing (settings.entry_priority - Fair Value Gap by default,
+          entered at its 50% level or a deeper fill; Order Block / Breaker
+          Block / Golden Ratio / CISD zones are also built but unused unless
+          added back to the priority tuple - first zone touched wins)
           -> fixed 15/30 point risk management + position sizing
             -> exit simulation (SL/TP walk-forward on the same candles)
 
@@ -133,7 +136,7 @@ def run_day(
     )
     if entry is None:
         result.status = TradeStatus.NO_SETUP
-        result.notes.append("Structure confirmed but no entry zone (CISD/OB/BB/Golden Ratio) was touched in time.")
+        result.notes.append("Structure confirmed but no entry zone (per settings.entry_priority) was touched in time.")
         return result
     result.entry = entry
 

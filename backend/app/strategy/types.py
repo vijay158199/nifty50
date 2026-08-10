@@ -42,6 +42,7 @@ class EntryType(str, Enum):
     ORDER_BLOCK = "ORDER_BLOCK"
     BREAKER_BLOCK = "BREAKER_BLOCK"
     GOLDEN_RATIO = "GOLDEN_RATIO"
+    FAIR_VALUE_GAP = "FVG"
 
 
 class TradeStatus(str, Enum):

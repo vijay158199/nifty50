@@ -19,7 +19,9 @@ from app.models.db import get_session
 from app.models.schema import LiveControl
 
 _ROW_ID = 1
-VALID_INTERVALS = ("1m", "3m", "5m")
+# 1m only, per explicit user spec (2026-08-10) - 3m/5m were previously
+# offered as selectable options but are no longer used anywhere.
+VALID_INTERVALS = ("1m",)
 
 
 def _as_date(value: dt.date | dt.datetime | None) -> dt.date | None:
@@ -38,6 +40,12 @@ def _get_or_create(session) -> LiveControl:
         row = LiveControl(id=_ROW_ID, enabled=False, structure_interval=settings.structure_interval)
         session.add(row)
         session.flush()
+    elif row.structure_interval not in VALID_INTERVALS:
+        # A row persisted before 3m/5m were dropped from VALID_INTERVALS -
+        # normalize it rather than leaving the live monitor stuck polling an
+        # interval that's no longer selectable or supported.
+        row.structure_interval = settings.structure_interval
+        row.updated_at = dt.datetime.utcnow()
     return row
 
 

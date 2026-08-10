@@ -1,11 +1,13 @@
-"""Entry timing detectors: CISD, Order Block, Breaker Block, Golden Ratio.
+"""Entry timing detectors: CISD, Order Block, Breaker Block, Golden Ratio,
+Fair Value Gap.
 
-All four operate on the "displacement leg" - the impulsive move that caused
+All five operate on the "displacement leg" - the impulsive move that caused
 the structure break (MSS/CHOCH/BOS) - and look for price to retrace back
 into a zone before the move continues, which is where the actual entry is
 taken. Zones are computed once from data available at the structure-event
 bar (no look-ahead); the entry itself is found by scanning forward bar by
-bar for the first zone touched, in priority order.
+bar for the first zone touched, in priority order. Default priority
+(settings.entry_priority) is Fair Value Gap only - see _find_fvg.
 """
 from __future__ import annotations
 
@@ -33,6 +35,7 @@ class EntryZones:
     order_block: _Zone | None = None
     breaker_block: _Zone | None = None
     golden_ratio: _Zone | None = None
+    fair_value_gap: _Zone | None = None
 
     def get(self, entry_type: EntryType) -> _Zone | None:
         return {
@@ -40,6 +43,7 @@ class EntryZones:
             EntryType.ORDER_BLOCK: self.order_block,
             EntryType.BREAKER_BLOCK: self.breaker_block,
             EntryType.GOLDEN_RATIO: self.golden_ratio,
+            EntryType.FAIR_VALUE_GAP: self.fair_value_gap,
         }[entry_type]
 
 
@@ -54,6 +58,25 @@ def _last_opposite_candle(displacement: pd.DataFrame, bullish_leg: bool) -> tupl
         if not bullish_leg and not is_bearish:
             return ts, row
     return None
+
+
+def _find_fvg(displacement: pd.DataFrame, bullish: bool) -> tuple[pd.Timestamp, float, float] | None:
+    """Classic 3-candle Fair Value Gap: candle 1's high/low leaves a gap with
+    candle 3's low/high once candle 2's impulsive move is accounted for. A
+    bullish FVG needs c1.High < c3.Low (gap between them); a bearish FVG
+    needs c1.Low > c3.High. Scans the whole displacement leg and keeps the
+    LAST (most recent, freshest) qualifying triple, since that's the gap
+    closest to - and most relevant for - the structure break that just
+    happened. Returns (ts of candle 3, gap_low, gap_high)."""
+    found = None
+    for i in range(2, len(displacement)):
+        c1 = displacement.iloc[i - 2]
+        c3 = displacement.iloc[i]
+        if bullish and float(c1["High"]) < float(c3["Low"]):
+            found = (displacement.index[i], float(c1["High"]), float(c3["Low"]))
+        elif not bullish and float(c1["Low"]) > float(c3["High"]):
+            found = (displacement.index[i], float(c3["High"]), float(c1["Low"]))
+    return found
 
 
 def build_entry_zones(
@@ -149,6 +172,25 @@ def build_entry_zones(
         reason=f"Golden ratio {gr_low_pct:.1%}-{gr_high_pct:.1%} retracement of leg "
         f"{leg_low:.1f}-{leg_high:.1f} = zone {zone_bottom:.1f}-{zone_top:.1f}",
     )
+
+    # --- Fair value gap: entry at the 50% (CE) level or a deeper fill -------
+    # The zone spans from the gap's far edge (full fill) up to its midpoint,
+    # not the whole gap - reusing scan_for_entry's generic "did price touch
+    # this zone" check this way means it only fires once price has retraced
+    # AT LEAST to the 50% level, per explicit user spec, not on a shallow
+    # touch of the gap's near edge.
+    fvg = _find_fvg(displacement, bullish)
+    if fvg is not None:
+        _, gap_low, gap_high = fvg
+        midpoint = (gap_low + gap_high) / 2.0
+        zone_high, zone_low = (midpoint, gap_low) if bullish else (gap_high, midpoint)
+        zones.fair_value_gap = _Zone(
+            entry_type=EntryType.FAIR_VALUE_GAP,
+            high=zone_high,
+            low=zone_low,
+            level=midpoint,
+            reason=f"Fair value gap {gap_low:.1f}-{gap_high:.1f}; entry at 50% (CE) = {midpoint:.1f} or deeper fill",
+        )
 
     return zones
 

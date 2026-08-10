@@ -31,10 +31,9 @@
       <button class="btn primary" type="submit">Run Backtest</button>
     </form>
     <div class="note" style="margin-top: 14px;">
-      1m and 3m candles are only available from Yahoo Finance for the trailing ~30 days (3m is derived
-      by resampling 1m ourselves - Yahoo has no native 3m interval); 5m covers the full ~60-day window.
-      Older days outside a timeframe's window automatically fall back to 5m (flagged "Reduced" in the
-      results). {{ settings.first_candle_minutes }}-minute breakout/liquidity detection is unaffected either way.
+      1m candles are only available from Yahoo Finance for the trailing ~30 days; older days automatically
+      fall back to 5m for structure/entry detection (flagged "Reduced" in the results).
+      {{ settings.first_candle_minutes }}-minute breakout/liquidity detection is unaffected either way.
     </div>
     <div id="backtest-run-area" style="margin-top: 16px;"></div>
   </div>

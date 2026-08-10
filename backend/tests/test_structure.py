@@ -121,6 +121,36 @@ def test_choch_low_requires_a_confirming_second_break(session_start):
     assert event.signal_label == "CHOCH Low"
 
 
+def test_bos_rejected_when_confirmation_candle_has_a_weak_body(session_start, monkeypatch):
+    """settings.require_displacement_candle (default True) rejects a close
+    beyond the swing point when the breaking candle's own body is weak
+    relative to recent bars - it isn't real displacement, just a close that
+    happens to be beyond the level. Same swing setup as
+    test_bos_high_when_break_continues_bullish, but bar3's body (0.7) is
+    well under 1.5x the ~1.0 average body of bars 0-2."""
+    from app.config import settings
+    from app.strategy.structure import detect_bos_choch
+    from app.strategy.types import LiquiditySide
+
+    rows = [
+        (100, 101, 99, 100),          # body 0
+        (100, 105, 100, 102),         # swing high candidate H=105, body 2
+        (102, 102, 101, 101),         # confirms bar1, body 1
+        (104.8, 106, 104.5, 105.5),   # closes above 105 (105.5) but body only 0.7
+    ]
+    candles = make_candles(rows, session_start, 1)
+
+    monkeypatch.setattr(settings, "require_displacement_candle", True)
+    monkeypatch.setattr(settings, "displacement_lookback_bars", 20)
+    monkeypatch.setattr(settings, "displacement_body_multiplier", 1.5)
+    assert detect_bos_choch(candles, LiquiditySide.HIGH, window=1, search_bar_limit=len(candles)) is None
+
+    monkeypatch.setattr(settings, "require_displacement_candle", False)
+    event = detect_bos_choch(candles, LiquiditySide.HIGH, window=1, search_bar_limit=len(candles))
+    assert event is not None
+    assert event.structure_type.value == "BOS"
+
+
 def test_returns_none_when_nothing_breaks(session_start):
     from app.strategy.structure import detect_bos_choch
     from app.strategy.types import LiquiditySide

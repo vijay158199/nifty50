@@ -45,26 +45,35 @@ class Settings(BaseSettings):
     timezone: str = "Asia/Kolkata"
 
     # --- Strategy parameters -------------------------------------------
-    # Structure/entry/exit granularity below the 30m liquidity levels.
-    # Set to 5m per explicit user preference - NOTE: a 60-day backtest
-    # comparison (2026-08-01) actually showed 1m outperforming 5m (48.6%
-    # win / +217pts vs 31.6% win / -15pts on the same window), so this is
-    # not backed by the available evidence. Revisit if live results don't
-    # match expectations. 5m does incidentally give a full 60-day backtest
-    # window uniformly, since it survives Yahoo's rolling cutoff twice as
-    # long as 1m does (60 days vs 30).
-    structure_interval: str = "5m"         # "1m" | "3m" | "5m"
+    # Structure/entry/exit granularity below the 60m liquidity levels.
+    # Fixed to 1m per explicit user spec (2026-08-10) - 3m/5m are no longer
+    # offered (see live.control.VALID_INTERVALS). NOTE: 1m candles are only
+    # available from Yahoo for the trailing ~30 days (settings.
+    # yfinance_1m_lookback_days), vs 5m's ~60 - backtests further back than
+    # that automatically fall back to 5m for those days (flagged
+    # reduced_resolution=True), same as before.
+    structure_interval: str = "1m"
     swing_fractal_window: int = 3          # bars either side for a fractal swing point
     require_smt_alignment: bool = False    # if True, SMT divergence is mandatory, not just supportive
     # If True, BOS-classified setups (continuation) are rejected as
     # NO_SETUP - only CHOCH (reversal) setups are ever traded.
     require_choch_only: bool = False
-    # CISD removed from the default priority (2026-08-02) - observed live to
-    # drag down win rate; matches an earlier backtest finding too (12.5% win
-    # rate on CISD trades vs 45%+ on Breaker Block, same sample). Zones are
-    # still built for it in entries.py (harmless/unused) so it can be added
-    # back by just editing this tuple if that ever changes.
-    entry_priority: tuple[str, ...] = ("ORDER_BLOCK", "BREAKER_BLOCK", "GOLDEN_RATIO")
+    # If True, a BOS/CHOCH break only counts once the breaking candle itself
+    # shows strong displacement (a "long body"), not just any close beyond
+    # the swing point - see structure._is_displacement_candle. Explicit user
+    # spec (2026-08-10): "wait for a CHOCH, MSS, or BOS confirmation candle
+    # with a long body, indicating strong displacement" - and skip waiting
+    # for a sweep/breakout close of the liquidity level itself (the trigger
+    # already fires on first touch - see breakout_sweep.find_trigger).
+    require_displacement_candle: bool = True
+    displacement_lookback_bars: int = 20       # prior bars used for the average-body baseline
+    displacement_body_multiplier: float = 1.5  # confirmation candle's body must be >= this x that average
+    # Entry model (2026-08-10, explicit user spec): Fair Value Gap only -
+    # enter on retracement to the 50% (CE) level of the FVG or deeper.
+    # CISD/Order Block/Breaker Block/Golden Ratio zones are still built in
+    # entries.py (harmless/unused) so they can be added back by just editing
+    # this tuple if that ever changes.
+    entry_priority: tuple[str, ...] = ("FVG",)
     golden_ratio_low: float = 0.618
     golden_ratio_high: float = 0.705
     # Expressed in minutes (not bars) so it means the same thing regardless

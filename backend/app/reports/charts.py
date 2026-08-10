@@ -23,6 +23,7 @@ _ENTRY_COLORS = {
     "ORDER_BLOCK": "#3b82f6",
     "BREAKER_BLOCK": "#f97316",
     "GOLDEN_RATIO": "#eab308",
+    "FVG": "#14b8a6",
 }
 
 
