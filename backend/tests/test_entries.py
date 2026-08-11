@@ -51,6 +51,9 @@ def test_build_entry_zones_produces_sane_bullish_zones():
     assert 97.0 < zones.golden_ratio.low < zones.golden_ratio.high < 112.0
     # breaker block found further back and confirmed as swept by the displacement
     assert zones.breaker_block is not None
+    # displacement leg's own high/low, exposed for dynamic SL/TP (risk.py)
+    assert zones.leg_low == 97.0
+    assert zones.leg_high == 112.0
 
 
 def test_build_entry_zones_produces_a_fair_value_gap_zone_at_the_50pct_level():

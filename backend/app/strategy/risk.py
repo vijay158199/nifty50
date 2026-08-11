@@ -1,5 +1,9 @@
-"""Fixed-points risk management: 15-point stop, 30-point target, position
-sizing derived from the stop-loss distance and configured risk-per-trade."""
+"""Risk management: SL/TP either fixed-points (15/30 by default) or, per
+settings.dynamic_risk_from_displacement, set from the displacement leg's own
+high/low - the swing origin through the running extreme the leg reached
+before entry. Either way, position sizing is derived from the actual
+stop-loss distance and configured risk-per-trade, so a tighter dynamic stop
+sizes up and a wider one sizes down for the same rupee risk."""
 from __future__ import annotations
 
 import math
@@ -8,16 +12,30 @@ from app.config import settings
 from app.strategy.types import Direction, RiskPlan
 
 
-def build_risk_plan(entry_price: float, direction: Direction) -> RiskPlan:
-    sl_points = settings.stop_loss_points
-    tp_points = settings.take_profit_points
-
-    if direction is Direction.BUY:
-        stop_loss = entry_price - sl_points
-        take_profit = entry_price + tp_points
+def build_risk_plan(
+    entry_price: float,
+    direction: Direction,
+    leg_high: float | None = None,
+    leg_low: float | None = None,
+) -> RiskPlan:
+    if settings.dynamic_risk_from_displacement and leg_high is not None and leg_low is not None:
+        # BUY: the leg ran up from leg_low - that origin invalidates the
+        # setup if retaken, so SL sits there; TP is the leg's own high (the
+        # extreme it already proved it could reach). Mirrored for SELL.
+        if direction is Direction.BUY:
+            stop_loss, take_profit = leg_low, leg_high
+        else:
+            stop_loss, take_profit = leg_high, leg_low
+        sl_points = abs(entry_price - stop_loss)
     else:
-        stop_loss = entry_price + sl_points
-        take_profit = entry_price - tp_points
+        sl_points = settings.stop_loss_points
+        tp_points = settings.take_profit_points
+        if direction is Direction.BUY:
+            stop_loss = entry_price - sl_points
+            take_profit = entry_price + tp_points
+        else:
+            stop_loss = entry_price + sl_points
+            take_profit = entry_price - tp_points
 
     risk_amount = settings.account_capital * (settings.risk_pct_per_trade / 100.0)
     points_at_risk_per_lot = sl_points * settings.lot_size

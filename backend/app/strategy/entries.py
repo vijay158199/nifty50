@@ -36,6 +36,12 @@ class EntryZones:
     breaker_block: _Zone | None = None
     golden_ratio: _Zone | None = None
     fair_value_gap: _Zone | None = None
+    # The displacement leg's own high/low (the swing origin through the
+    # running extreme reached during the move) - exposed so risk.py can set
+    # SL/TP from the leg itself instead of a fixed point distance, per
+    # settings.dynamic_risk_from_displacement.
+    leg_high: float | None = None
+    leg_low: float | None = None
 
     def get(self, entry_type: EntryType) -> _Zone | None:
         return {
@@ -113,7 +119,7 @@ def build_entry_zones(
     if leg_range <= 0:
         return None
 
-    zones = EntryZones()
+    zones = EntryZones(leg_high=leg_high, leg_low=leg_low)
 
     # --- Order Block + CISD share the same candidate candle -----------------
     candidate = _last_opposite_candle(displacement.iloc[:-1] if len(displacement) > 1 else displacement, bullish)

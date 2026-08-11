@@ -123,6 +123,24 @@
 <div class="card">
   <div class="card-header">
     <div>
+      <h2>Today's Live Chart</h2>
+      <div class="card-sub">{{ settings.primary_label }} session so far &middot; auto-refreshes every 60s</div>
+    </div>
+  </div>
+  <div class="card-body" style="text-align: center;">
+    <img id="live-chart-img" src="/api/live/chart.png" alt="Today's live chart"
+         style="max-width: 100%; border-radius: 8px;"
+         onload="this.style.display='block'; document.getElementById('live-chart-empty').style.display='none';"
+         onerror="this.style.display='none'; document.getElementById('live-chart-empty').style.display='block';">
+    <div id="live-chart-empty" class="empty-state" style="display: none;">
+      No chart data yet for today's session.
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <div>
       <h2>Live Monitor Control</h2>
       <div class="card-sub">
         {% if live_status.is_active_today %}
@@ -205,6 +223,13 @@
 </div>
 
 <script>
+  (function () {
+    const img = document.getElementById('live-chart-img');
+    setInterval(function () {
+      img.src = '/api/live/chart.png?t=' + Date.now();
+    }, 60000);
+  })();
+
   const eqData = {{ equity_curve | tojson }};
   const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   const styles = getComputedStyle(document.documentElement);

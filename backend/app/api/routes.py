@@ -8,7 +8,7 @@ import os
 import threading
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app.api import queries
@@ -16,11 +16,14 @@ from app.auth import SESSION_KEY, verify_credentials
 from app.backtest.runner import run_backtest
 from app.config import BACKEND_DIR, settings
 from app.data.calendar import is_trading_day, now_ist, trading_days
+from app.data.fetcher import INTERVAL_MINUTES, get_session_data
 from app.live import control as live_control
 from app.live.monitor import poll_once
 from app.live.scheduler import get_scheduler
-from app.models.db import get_session
+from app.models.db import get_session, log_event
 from app.models.schema import BacktestRun
+from app.reports import charts
+from app.strategy.engine import run_day
 from app.strategy.types import Direction, EntryType, TradeStatus
 
 router = APIRouter()
@@ -120,6 +123,38 @@ def set_live_structure_interval(interval: str = Form(...)):
     Takes effect on the next poll - no restart needed."""
     live_control.set_structure_interval(interval)
     return {"structure_interval": interval}
+
+
+@router.get("/api/live/chart.png")
+def live_chart_png():
+    """Renders today's session chart fresh on every request (same pipeline
+    poll_once runs, just not persisted) - backs the overview page's "Today's
+    Live Chart" <img>, which polls this on a timer. Returns 204 rather than
+    a broken image when there's nothing to show yet (no data, or the fetch
+    itself fails - e.g. off-hours/yfinance hiccup)."""
+    trade_date = now_ist().date()
+    try:
+        live_interval = live_control.get_structure_interval()
+        sd_primary = get_session_data(settings.primary_symbol, trade_date, structure_interval=live_interval)
+        sd_confirm = get_session_data(settings.confirm_symbol, trade_date, structure_interval=live_interval)
+        if sd_primary.fine.empty:
+            return Response(status_code=204)
+
+        result = run_day(
+            trade_date,
+            sd_primary.candles_30m,
+            sd_primary.fine,
+            sd_confirm.fine,
+            reduced_resolution=sd_primary.reduced_resolution,
+            candle_interval_minutes=INTERVAL_MINUTES.get(sd_primary.resolution, 1),
+        )
+        png_bytes = charts.render_live_chart(result, sd_primary.fine)
+        if png_bytes is None:
+            return Response(status_code=204)
+        return Response(content=png_bytes, media_type="image/png")
+    except Exception as exc:  # noqa: BLE001 - this backs an <img> tag, never 500 it
+        log_event("WARNING", "api.live_chart", f"live_chart_png failed for {trade_date}: {exc}")
+        return Response(status_code=204)
 
 
 @router.get("/trades", response_class=HTMLResponse)

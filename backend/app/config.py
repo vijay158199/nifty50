@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     entry_search_minutes: int = 180        # stop looking for an entry after this many minutes from trigger
 
     # --- Risk management -------------------------------------------------
+    # If True (explicit user spec, 2026-08-11), SL/TP are set from the
+    # displacement leg's own high/low instead of a fixed point distance -
+    # SL at the leg's origin (invalidates the setup if retaken), TP at the
+    # leg's own extreme. stop_loss_points/take_profit_points become an
+    # unused fallback (kept so this can be reverted by flipping this flag,
+    # same pattern as entry_priority/require_choch_only).
+    dynamic_risk_from_displacement: bool = True
     stop_loss_points: float = 15.0
     take_profit_points: float = 30.0
     account_capital: float = 100_000.0

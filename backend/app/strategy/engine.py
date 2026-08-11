@@ -2,17 +2,22 @@
 
   settings.first_candle_minutes first-candle (60m by default - see that
   setting's comment for why) -> first liquidity interaction (high or low
-  touched), detected on `settings.structure_interval` candles (5m by
-  default - found to produce cleaner signals than 1m, with less noise)
+  touched), detected on `settings.structure_interval` candles (1m by
+  default, also selectable per live-session/backtest-run as 2m/3m/5m)
     -> structure on the same interval (BOS = continuation, CHOCH = reversal),
-      requiring a long-body confirmation candle by default (see
-      structure.detect_bos_choch) - derives direction
+      requiring the confirming candle itself to show strong displacement (a
+      "long body") by default (see structure.detect_bos_choch) - derives
+      direction; a break with no displacement is simply not considered
       -> SMT divergence check (supportive by default, mandatory if configured)
-        -> entry timing (settings.entry_priority - Fair Value Gap by default,
-          entered at its 50% level or a deeper fill; Order Block / Breaker
-          Block / Golden Ratio / CISD zones are also built but unused unless
-          added back to the priority tuple - first zone touched wins)
-          -> fixed 15/30 point risk management + position sizing
+        -> entry timing (settings.entry_priority - Fair Value Gap by
+          default, entered at its 50% level or a deeper fill; Order Block /
+          Breaker Block / Golden Ratio / CISD zones are also built but
+          unused unless added back to the priority tuple - first zone
+          touched wins)
+          -> risk management + position sizing: SL/TP from the
+            displacement leg's own high/low by default (settings.
+            dynamic_risk_from_displacement), fixed 15/30 points as a
+            fallback - see risk.build_risk_plan
             -> exit simulation (SL/TP walk-forward on the same candles)
 
 Trade direction is NOT known until the structure stage resolves - the
@@ -141,7 +146,7 @@ def run_day(
     result.entry = entry
 
     # --- Stage 4: risk management ---------------------------------------------
-    risk_plan = build_risk_plan(entry.entry_price, structure_event.direction)
+    risk_plan = build_risk_plan(entry.entry_price, structure_event.direction, zones.leg_high, zones.leg_low)
     result.risk = risk_plan
     result.status = TradeStatus.OPEN
 

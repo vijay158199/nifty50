@@ -6,6 +6,7 @@ dashboard's Trade Log."""
 from __future__ import annotations
 
 import datetime as dt
+import io
 
 import matplotlib
 
@@ -147,3 +148,96 @@ def render_trade_snapshot(result: TradeResult, candles_fine: pd.DataFrame) -> st
     plt.close(fig)
 
     return str(out_path)
+
+
+def render_live_chart(result: TradeResult, candles_fine: pd.DataFrame) -> bytes | None:
+    """Live counterpart to render_trade_snapshot for the overview page's
+    "Today's Live Chart" card: renders the FULL session so far (not a
+    cropped window) and doesn't require a resolved (or even found) trade -
+    shows just the liquidity band on a NO_SETUP day, adds the structure
+    marker once structure resolves, and the entry zone/SL/TP once an entry
+    is found. Returns PNG bytes directly (not saved to disk - this is
+    regenerated fresh on every request, not archived per-trade)."""
+    if candles_fine.empty:
+        return None
+
+    has_risk = result.entry is not None and result.risk is not None
+    hlines = None
+    if has_risk:
+        hlines = dict(
+            hlines=[result.entry.entry_price, result.risk.stop_loss, result.risk.take_profit],
+            colors=["#3b82f6", "#ef4444", "#22c55e"],
+            linestyle="--",
+            linewidths=1,
+        )
+
+    title = f"{result.trade_date.strftime('%d %b %Y')} · {result.symbol_label}"
+    if result.direction is not None:
+        title += f" {result.direction.value}"
+    if result.entry is not None:
+        title += f" - {result.entry.entry_type.value}"
+    title += f" ({result.status.value})"
+
+    fig, axlist = mpf.plot(
+        candles_fine,
+        type="candle",
+        style="yahoo",
+        hlines=hlines,
+        title=title,
+        returnfig=True,
+        figsize=(9.6, 4.4),
+    )
+    ax = axlist[0]
+    x_last = len(candles_fine) - 1
+    y_top = max([candles_fine["High"].max()] + ([result.risk.take_profit] if has_risk else []))
+    y_bottom = min([candles_fine["Low"].min()] + ([result.risk.stop_loss] if has_risk else []))
+    y_span = max(y_top - y_bottom, 1.0)
+    ax.set_ylim(y_bottom - y_span * 0.12, y_top + y_span * 0.14)
+
+    if has_risk:
+        for price, label, color in (
+            (result.entry.entry_price, "Entry", "#3b82f6"),
+            (result.risk.stop_loss, "SL", "#ef4444"),
+            (result.risk.take_profit, "TP", "#22c55e"),
+        ):
+            ax.text(x_last, price, f" {label}", fontsize=7, color=color, fontweight="bold", va="center", ha="left")
+
+    if result.trigger is not None:
+        ax.axhspan(result.trigger.first_candle_low, result.trigger.first_candle_high, color="#94a3b8", alpha=0.16, zorder=0)
+        ax.text(
+            0, result.trigger.first_candle_high, f" {settings.first_candle_minutes}m liquidity ",
+            fontsize=7, color="#64748b", va="bottom", ha="left",
+        )
+
+    if result.structure is not None:
+        pos = _nearest_pos(candles_fine.index, result.structure.ts)
+        if pos is not None:
+            color = _STRUCTURE_COLORS.get(result.structure.structure_type.value, "#a855f7")
+            ax.axvline(x=pos, color=color, linestyle=":", linewidth=1.3, zorder=1, ymax=0.95)
+            label = result.structure.signal_label
+            if result.structure.smt_divergence:
+                label += " +SMT"
+            ax.annotate(
+                label,
+                xy=(pos, y_top + y_span * 0.14), xycoords="data",
+                fontsize=7.5, color=color, fontweight="bold", ha="center", va="top",
+            )
+
+    if result.entry is not None:
+        entry_pos = _nearest_pos(candles_fine.index, result.entry.entry_time)
+        entry_color = _ENTRY_COLORS.get(result.entry.entry_type.value, "#3b82f6")
+        if result.entry.zone_high is not None and result.entry.zone_low is not None:
+            ax.axhspan(result.entry.zone_low, result.entry.zone_high, color=entry_color, alpha=0.18, zorder=0)
+        if entry_pos is not None:
+            ax.annotate(
+                result.entry.entry_type.value,
+                xy=(entry_pos, result.entry.entry_price),
+                xytext=(0, -20), textcoords="offset points",
+                fontsize=7.5, color=entry_color, fontweight="bold", ha="center",
+                arrowprops=dict(arrowstyle="->", color=entry_color, linewidth=1),
+            )
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=115, bbox_inches="tight")
+    plt.close(fig)
+    return buf.getvalue()
