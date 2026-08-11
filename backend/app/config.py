@@ -53,7 +53,18 @@ class Settings(BaseSettings):
     # Backtests further back than a timeframe's window automatically fall
     # back to 5m for those days (flagged reduced_resolution=True).
     structure_interval: str = "1m"         # "1m" | "2m" | "3m" | "5m"
-    swing_fractal_window: int = 3          # bars either side for a fractal swing point
+    # Bars either side needed to confirm a fractal swing point - also the
+    # lag before CHOCH/BOS can even be evaluated against it. Changed from 3
+    # to 2 (2026-08-11): window=3 was confirming structure noticeably later
+    # than the user's own reference charts (e.g. 11:26 vs an expected ~11:07
+    # on 2026-08-11) - window=2 lands on the same ~11:09 timing as window=1
+    # while a 43-day backtest showed it keeps the same trade count and
+    # actually higher net points/rupees than window=3 (+160.4pts/Rs.12,193
+    # vs +137.9pts/Rs.10,343), at the cost of a few points of win rate
+    # (72.2% vs 77.8%) and drawdown (26.9 vs 21.7pts). window=1 matched the
+    # reference timing even more exactly but backtested clearly worse
+    # (57.1% win, +49.6pts) - not used.
+    swing_fractal_window: int = 2
     require_smt_alignment: bool = False    # if True, SMT divergence is mandatory, not just supportive
     # If True, BOS-classified setups (continuation) are rejected as
     # NO_SETUP - only CHOCH (reversal) setups are ever traded.
