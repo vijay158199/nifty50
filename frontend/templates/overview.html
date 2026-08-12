@@ -71,9 +71,9 @@
       <div class="pipeline-stage {{ 'done' if pipeline.reached >= 1 else ('current' if pipeline.reached == 0 else 'pending') }}">
         <div class="pipeline-num">1</div>
         <div class="pipeline-label">Liquidity</div>
-        {% if today_trade and today_trade.liquidity_side %}
-          <div class="pipeline-value">{{ today_trade.liquidity_side }} taken</div>
-          <div class="pipeline-detail">{{ today_trade.trigger_type or "-" }} &middot; {{ today_trade.trigger_time.strftime('%H:%M') if today_trade.trigger_time else "-" }}</div>
+        {% if pipeline.liquidity %}
+          <div class="pipeline-value">{{ pipeline.liquidity.side }} taken</div>
+          <div class="pipeline-detail">{{ pipeline.liquidity.type or "-" }} candle tapped at {{ pipeline.liquidity.time.strftime('%H:%M') if pipeline.liquidity.time else "-" }}</div>
         {% else %}
           <div class="pipeline-value">Not yet</div>
         {% endif %}
@@ -82,9 +82,12 @@
       <div class="pipeline-stage {{ 'done' if pipeline.reached >= 2 else ('current' if pipeline.reached == 1 else 'pending') }}">
         <div class="pipeline-num">2</div>
         <div class="pipeline-label">Structure</div>
-        {% if today_trade and today_trade.mss_choch_bos %}
-          <div class="pipeline-value">{{ today_trade.mss_choch_bos }} {{ (today_trade.liquidity_side or "").title() }}</div>
-          <div class="pipeline-detail">{{ today_trade.direction or "-" }}</div>
+        {% if pipeline.structure %}
+          <div class="pipeline-value">{{ pipeline.structure.type }} {{ (pipeline.structure.side or "").title() }} &middot; {{ pipeline.structure.bias or "-" }}</div>
+          <div class="pipeline-detail">
+            Formed at {{ pipeline.structure.time.strftime('%H:%M') if pipeline.structure.time else "-" }}
+            {% if pipeline.structure.candle_count %}&middot; {{ pipeline.structure.candle_count }} candle{{ "s" if pipeline.structure.candle_count != 1 else "" }} after the tap{% endif %}
+          </div>
         {% else %}
           <div class="pipeline-value">Not yet</div>
         {% endif %}
@@ -93,9 +96,12 @@
       <div class="pipeline-stage {{ 'done' if pipeline.reached >= 3 else ('current' if pipeline.reached == 2 else 'pending') }}">
         <div class="pipeline-num">3</div>
         <div class="pipeline-label">Entry</div>
-        {% if today_trade and today_trade.entry_type %}
-          <div class="pipeline-value">{{ today_trade.entry_type }}</div>
-          <div class="pipeline-detail">{{ "%.1f"|format(today_trade.entry_price) if today_trade.entry_price else "-" }}</div>
+        {% if pipeline.entry %}
+          <div class="pipeline-value">{{ pipeline.entry.type }} @ {{ "%.1f"|format(pipeline.entry.price) if pipeline.entry.price is not none else "-" }}</div>
+          <div class="pipeline-detail">
+            TP {{ "%.1f"|format(pipeline.entry.target) if pipeline.entry.target is not none else "-" }}
+            &middot; SL {{ "%.1f"|format(pipeline.entry.stop_loss) if pipeline.entry.stop_loss is not none else "-" }}
+          </div>
         {% else %}
           <div class="pipeline-value">Not yet</div>
         {% endif %}
@@ -104,9 +110,9 @@
       <div class="pipeline-stage {{ 'done' if pipeline.reached >= 4 else ('current' if pipeline.reached == 3 else 'pending') }}">
         <div class="pipeline-num">4</div>
         <div class="pipeline-label">Outcome</div>
-        {% if today_trade and pipeline.reached == 4 %}
-          <div class="pipeline-value">{{ m.status_pill(today_trade.status) }}</div>
-          <div class="pipeline-detail">{{ m.pnl_span(today_trade.pnl_points) }} pts</div>
+        {% if pipeline.outcome %}
+          <div class="pipeline-value">{{ m.status_pill(pipeline.outcome.status) }}</div>
+          <div class="pipeline-detail">{{ pipeline.outcome.hit }} &middot; {{ m.pnl_span(pipeline.outcome.pnl_points) }} pts</div>
         {% elif pipeline.reached == 3 %}
           <div class="pipeline-value">{{ m.status_pill(today_trade.status) }}</div>
         {% else %}
@@ -114,8 +120,11 @@
         {% endif %}
       </div>
     </div>
+    {% if pipeline.summary %}
+    <div class="note" style="margin-top: 14px;"><strong>Today's trading, in one line:</strong> {{ pipeline.summary }}</div>
+    {% endif %}
     {% if pipeline.notes %}
-    <div class="note" style="margin-top: 14px;"><strong>Why it stopped here:</strong> {{ pipeline.notes }}</div>
+    <div class="note" style="margin-top: 8px;"><strong>Why it stopped here:</strong> {{ pipeline.notes }}</div>
     {% endif %}
   </div>
 </div>

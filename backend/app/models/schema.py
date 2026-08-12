@@ -67,6 +67,10 @@ class Trade(Base):
     snapshot_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     mss_choch_bos: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # When BOS/CHOCH actually confirmed - distinct from trigger_time (the
+    # earlier liquidity tap) - drives the Overview pipeline card's "N
+    # candles since liquidity tap" and structure-confirmation-time display.
+    structure_time: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     # Human-readable reason(s) the pipeline stopped where it did (e.g. "No
     # BOS/CHOCH resolved the liquidity interaction within the search
     # window.") - engine.run_day always computes this (TradeResult.notes)

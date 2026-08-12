@@ -11,6 +11,8 @@ from sqlalchemy import desc, select
 
 from app.backtest.stats import BacktestStats, compute_stats
 from app.data.calendar import now_ist
+from app.data.fetcher import INTERVAL_MINUTES
+from app.live import control as live_control
 from app.models.db import get_session
 from app.models.schema import BacktestRun, ErrorLog, LiveHeartbeat, Trade
 
@@ -62,23 +64,125 @@ def get_today_trade() -> dict | None:
 _RESOLVED_STATUSES = {"TARGET_HIT", "STOP_HIT", "MANUAL_EXIT"}
 
 
+_OUTCOME_LABELS = {
+    "TARGET_HIT": "Target Hit",
+    "STOP_HIT": "Stop-Loss Hit",
+    "MANUAL_EXIT": "Session-End Exit",
+}
+
+
+def _fmt_time(ts: dt.datetime | None) -> str:
+    return ts.strftime("%H:%M") if ts else "-"
+
+
+def _fmt_price(v: float | None) -> str:
+    return f"{v:.1f}" if v is not None else "-"
+
+
+def _build_day_summary(trade: dict, liquidity: dict | None, structure: dict | None,
+                        entry: dict | None, outcome: dict | None) -> str:
+    symbol = trade.get("symbol_label") or "NIFTY 50"
+
+    if liquidity is None:
+        return f"{symbol}'s 60-minute liquidity level was never tapped today - no setup."
+    side = (liquidity["side"] or "-").title()
+    parts = [f"{symbol} tapped the 60m {side} at {_fmt_time(liquidity['time'])}"]
+
+    if structure is None:
+        return ", ".join(parts) + ", but no BOS/CHOCH confirmed afterward - no setup today."
+    cc = structure["candle_count"]
+    cc_txt = f", {cc} candle{'s' if cc != 1 else ''} later" if cc else ""
+    parts.append(
+        f"confirmed a {structure['bias'] or '-'} {structure['type'] or '-'} "
+        f"at {_fmt_time(structure['time'])}{cc_txt}"
+    )
+
+    if entry is None:
+        return ", ".join(parts) + ", but price never retraced into an entry zone - no trade taken."
+    parts.append(
+        f"entered {entry['type']} at {_fmt_price(entry['price'])} "
+        f"(SL {_fmt_price(entry['stop_loss'])} / TP {_fmt_price(entry['target'])})"
+    )
+
+    if outcome is None:
+        return ", ".join(parts) + " - still open."
+    pnl = outcome.get("pnl_points")
+    pnl_txt = f"{pnl:+.1f} pts" if pnl is not None else "-"
+    parts.append(f"{outcome['hit']} at {_fmt_time(outcome['exit_time'])} ({pnl_txt})")
+    return ", ".join(parts) + "."
+
+
 def get_pipeline_stage(trade: dict | None) -> dict:
     """How far today's setup has actually progressed through the strategy's
-    4 stages (Liquidity -> Structure -> Entry -> Outcome), plus the engine's
-    own explanation for why it stopped where it did (TradeResult.notes,
-    persisted as setup_notes) - drives the Overview page's pipeline view."""
+    4 stages (Liquidity -> Structure -> Entry -> Outcome), the detail behind
+    each stage (tap time/type, candles-to-confirm, bullish/bearish bias,
+    target/stop, hit outcome), a plain-English one-line summary of the whole
+    day, and the engine's own explanation for why it stopped where it did
+    (TradeResult.notes, persisted as setup_notes) - drives the Overview
+    page's pipeline view."""
     if trade is None:
-        return {"reached": 0, "notes": None}
+        return {
+            "reached": 0, "notes": None,
+            "liquidity": None, "structure": None, "entry": None, "outcome": None,
+            "summary": "No session data yet today.",
+        }
+
     reached = 0
+    liquidity = structure = entry = outcome = None
+
     if trade.get("trigger_time"):
         reached = 1
+        liquidity = {
+            "side": trade.get("liquidity_side"),
+            "type": trade.get("trigger_type"),
+            "time": trade.get("trigger_time"),
+        }
+
     if trade.get("mss_choch_bos"):
         reached = 2
+        candle_count = None
+        structure_time = trade.get("structure_time")
+        trigger_time = trade.get("trigger_time")
+        if structure_time and trigger_time:
+            interval_minutes = INTERVAL_MINUTES.get(live_control.get_structure_interval(), 1)
+            elapsed_minutes = (structure_time - trigger_time).total_seconds() / 60.0
+            candle_count = max(1, round(elapsed_minutes / interval_minutes))
+        structure = {
+            "type": trade.get("mss_choch_bos"),
+            "side": trade.get("liquidity_side"),
+            "time": structure_time,
+            "bias": "Bullish" if trade.get("direction") == "BUY" else ("Bearish" if trade.get("direction") == "SELL" else None),
+            "candle_count": candle_count,
+        }
+
     if trade.get("entry_type"):
         reached = 3
+        entry = {
+            "type": trade.get("entry_type"),
+            "price": trade.get("entry_price"),
+            "target": trade.get("take_profit"),
+            "stop_loss": trade.get("stop_loss"),
+        }
+
     if trade.get("status") in _RESOLVED_STATUSES:
         reached = 4
-    return {"reached": reached, "notes": trade.get("setup_notes")}
+        outcome = {
+            "hit": _OUTCOME_LABELS.get(trade["status"], trade["status"]),
+            "status": trade.get("status"),
+            "pnl_points": trade.get("pnl_points"),
+            "pnl_amount": trade.get("pnl_amount"),
+            "exit_time": trade.get("exit_time"),
+        }
+
+    return {
+        "reached": reached,
+        "notes": trade.get("setup_notes"),
+        "liquidity": liquidity,
+        "structure": structure,
+        "entry": entry,
+        "outcome": outcome,
+        "summary": _build_day_summary(trade, liquidity, structure, entry, outcome),
+    }
 
 
 def get_live_stats() -> BacktestStats:

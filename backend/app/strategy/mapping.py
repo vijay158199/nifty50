@@ -40,6 +40,7 @@ def trade_result_to_row(result: TradeResult, source: str, backtest_run_id: int |
         "reduced_resolution": result.reduced_resolution,
         "snapshot_path": None,  # filled in after chart rendering
         "mss_choch_bos": structure.structure_type.value if structure else None,
+        "structure_time": structure.ts if structure else None,
         "smt_divergence": structure.smt_divergence if structure else False,
         "setup_notes": " ".join(result.notes) if result.notes else None,
     }
