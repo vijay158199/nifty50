@@ -178,15 +178,23 @@ def render_live_chart(result: TradeResult, candles_fine: pd.DataFrame) -> bytes 
         title += f" - {result.entry.entry_type.value}"
     title += f" ({result.status.value})"
 
-    fig, axlist = mpf.plot(
-        candles_fine,
+    plot_kwargs = dict(
         type="candle",
         style="yahoo",
-        hlines=hlines,
         title=title,
         returnfig=True,
         figsize=(9.6, 4.4),
     )
+    # mplfinance's hlines validator rejects an explicit None outright (it
+    # only accepts a real dict/list or the kwarg being absent entirely) - on
+    # any day with no entry yet (the common case, e.g. NO_SETUP) `hlines` is
+    # None here, so it must be omitted rather than passed through. Passing
+    # it unconditionally crashed every no-entry render, which the route's
+    # broad except then swallowed into a silent "no chart data" empty state.
+    if hlines is not None:
+        plot_kwargs["hlines"] = hlines
+
+    fig, axlist = mpf.plot(candles_fine, **plot_kwargs)
     ax = axlist[0]
     x_last = len(candles_fine) - 1
     y_top = max([candles_fine["High"].max()] + ([result.risk.take_profit] if has_risk else []))
