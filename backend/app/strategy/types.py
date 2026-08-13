@@ -124,6 +124,9 @@ class TradeResult:
     structure: StructureEvent | None = None
     entry: EntrySignal | None = None
     risk: RiskPlan | None = None
+    # Candles making up the displacement/"explosive move" leg itself - set
+    # alongside entry (both come from the same build_entry_zones call).
+    leg_candle_count: int | None = None
 
     exit_time: dt.datetime | None = None
     exit_price: float | None = None

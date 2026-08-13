@@ -42,6 +42,10 @@ class EntryZones:
     # settings.dynamic_risk_from_displacement.
     leg_high: float | None = None
     leg_low: float | None = None
+    # Number of candles making up the displacement leg itself (origin swing
+    # through the structure-break bar, inclusive) - the "how many explosive
+    # candles formed" figure surfaced on the Overview page's pipeline card.
+    leg_candle_count: int | None = None
 
     def get(self, entry_type: EntryType) -> _Zone | None:
         return {
@@ -119,7 +123,7 @@ def build_entry_zones(
     if leg_range <= 0:
         return None
 
-    zones = EntryZones(leg_high=leg_high, leg_low=leg_low)
+    zones = EntryZones(leg_high=leg_high, leg_low=leg_low, leg_candle_count=len(displacement))
 
     # --- Order Block + CISD share the same candidate candle -----------------
     candidate = _last_opposite_candle(displacement.iloc[:-1] if len(displacement) > 1 else displacement, bullish)

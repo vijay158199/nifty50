@@ -86,7 +86,7 @@
           <div class="pipeline-value">{{ pipeline.structure.type }} {{ (pipeline.structure.side or "").title() }} &middot; {{ pipeline.structure.bias or "-" }}</div>
           <div class="pipeline-detail">
             Formed at {{ pipeline.structure.time.strftime('%H:%M') if pipeline.structure.time else "-" }}
-            {% if pipeline.structure.candle_count %}&middot; {{ pipeline.structure.candle_count }} candle{{ "s" if pipeline.structure.candle_count != 1 else "" }} after the tap{% endif %}
+            {% if pipeline.structure.candle_count %}&middot; {{ pipeline.structure.candle_count }} explosive candle{{ "s" if pipeline.structure.candle_count != 1 else "" }}{% endif %}
           </div>
         {% else %}
           <div class="pipeline-value">Not yet</div>
@@ -111,8 +111,8 @@
         <div class="pipeline-num">4</div>
         <div class="pipeline-label">Outcome</div>
         {% if pipeline.outcome %}
-          <div class="pipeline-value">{{ m.status_pill(pipeline.outcome.status) }}</div>
-          <div class="pipeline-detail">{{ pipeline.outcome.hit }} &middot; {{ m.pnl_span(pipeline.outcome.pnl_points) }} pts</div>
+          <div class="pipeline-value">{{ pipeline.outcome.hit }} &middot; <span style="color: var({{ '--status-good' if pipeline.outcome.result == 'Win' else '--status-critical' }}); font-weight: 600;">{{ pipeline.outcome.result }}</span></div>
+          <div class="pipeline-detail">{{ m.status_pill(pipeline.outcome.status) }} &middot; {{ m.pnl_span(pipeline.outcome.pnl_points) }} pts</div>
         {% elif pipeline.reached == 3 %}
           <div class="pipeline-value">{{ m.status_pill(today_trade.status) }}</div>
         {% else %}

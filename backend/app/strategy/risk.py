@@ -20,12 +20,18 @@ def build_risk_plan(
 ) -> RiskPlan:
     if settings.dynamic_risk_from_displacement and leg_high is not None and leg_low is not None:
         # BUY: the leg ran up from leg_low - that origin invalidates the
-        # setup if retaken, so SL sits there; TP is the leg's own high (the
-        # extreme it already proved it could reach). Mirrored for SELL.
+        # setup if retaken, so SL sits there. TP is the leg's own high
+        # PLUS settings.tp_extension_pct of the leg's range beyond it - an
+        # explicit user spec (2026-08-12): since entry is at the FVG's 50%
+        # level or a deeper fill, the target should likewise be the leg
+        # high or a further extension past it, not just the bare high.
+        # Mirrored for SELL.
+        leg_range = leg_high - leg_low
+        extension = settings.tp_extension_pct * leg_range
         if direction is Direction.BUY:
-            stop_loss, take_profit = leg_low, leg_high
+            stop_loss, take_profit = leg_low, leg_high + extension
         else:
-            stop_loss, take_profit = leg_high, leg_low
+            stop_loss, take_profit = leg_high, leg_low - extension
         sl_points = abs(entry_price - stop_loss)
     else:
         sl_points = settings.stop_loss_points

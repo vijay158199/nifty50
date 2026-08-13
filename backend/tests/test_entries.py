@@ -54,6 +54,8 @@ def test_build_entry_zones_produces_sane_bullish_zones():
     # displacement leg's own high/low, exposed for dynamic SL/TP (risk.py)
     assert zones.leg_low == 97.0
     assert zones.leg_high == 112.0
+    # displacement leg spans candles idx1 (origin swing low) through idx5 (event bar) = 5 candles
+    assert zones.leg_candle_count == 5
 
 
 def test_build_entry_zones_produces_a_fair_value_gap_zone_at_the_50pct_level():

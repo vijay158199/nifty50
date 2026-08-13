@@ -11,8 +11,6 @@ from sqlalchemy import desc, select
 
 from app.backtest.stats import BacktestStats, compute_stats
 from app.data.calendar import now_ist
-from app.data.fetcher import INTERVAL_MINUTES
-from app.live import control as live_control
 from app.models.db import get_session
 from app.models.schema import BacktestRun, ErrorLog, LiveHeartbeat, Trade
 
@@ -91,7 +89,7 @@ def _build_day_summary(trade: dict, liquidity: dict | None, structure: dict | No
     if structure is None:
         return ", ".join(parts) + ", but no BOS/CHOCH confirmed afterward - no setup today."
     cc = structure["candle_count"]
-    cc_txt = f", {cc} candle{'s' if cc != 1 else ''} later" if cc else ""
+    cc_txt = f" over {cc} explosive candle{'s' if cc != 1 else ''}" if cc else ""
     parts.append(
         f"confirmed a {structure['bias'] or '-'} {structure['type'] or '-'} "
         f"at {_fmt_time(structure['time'])}{cc_txt}"
@@ -108,7 +106,7 @@ def _build_day_summary(trade: dict, liquidity: dict | None, structure: dict | No
         return ", ".join(parts) + " - still open."
     pnl = outcome.get("pnl_points")
     pnl_txt = f"{pnl:+.1f} pts" if pnl is not None else "-"
-    parts.append(f"{outcome['hit']} at {_fmt_time(outcome['exit_time'])} ({pnl_txt})")
+    parts.append(f"{outcome['hit']} at {_fmt_time(outcome['exit_time'])} - {outcome['result']} ({pnl_txt})")
     return ", ".join(parts) + "."
 
 
@@ -140,19 +138,15 @@ def get_pipeline_stage(trade: dict | None) -> dict:
 
     if trade.get("mss_choch_bos"):
         reached = 2
-        candle_count = None
-        structure_time = trade.get("structure_time")
-        trigger_time = trade.get("trigger_time")
-        if structure_time and trigger_time:
-            interval_minutes = INTERVAL_MINUTES.get(live_control.get_structure_interval(), 1)
-            elapsed_minutes = (structure_time - trigger_time).total_seconds() / 60.0
-            candle_count = max(1, round(elapsed_minutes / interval_minutes))
         structure = {
             "type": trade.get("mss_choch_bos"),
             "side": trade.get("liquidity_side"),
-            "time": structure_time,
+            "time": trade.get("structure_time"),
             "bias": "Bullish" if trade.get("direction") == "BUY" else ("Bearish" if trade.get("direction") == "SELL" else None),
-            "candle_count": candle_count,
+            # Candles making up the displacement/"explosive move" leg itself
+            # (origin swing through the structure-break bar) - persisted
+            # exactly by the engine, not estimated from elapsed time.
+            "candle_count": trade.get("explosive_candle_count"),
         }
 
     if trade.get("entry_type"):
@@ -166,10 +160,12 @@ def get_pipeline_stage(trade: dict | None) -> dict:
 
     if trade.get("status") in _RESOLVED_STATUSES:
         reached = 4
+        pnl = trade.get("pnl_points")
         outcome = {
             "hit": _OUTCOME_LABELS.get(trade["status"], trade["status"]),
+            "result": "Win" if (pnl or 0) > 0 else "Loss",
             "status": trade.get("status"),
-            "pnl_points": trade.get("pnl_points"),
+            "pnl_points": pnl,
             "pnl_amount": trade.get("pnl_amount"),
             "exit_time": trade.get("exit_time"),
         }

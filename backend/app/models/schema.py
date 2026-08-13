@@ -71,6 +71,10 @@ class Trade(Base):
     # earlier liquidity tap) - drives the Overview pipeline card's "N
     # candles since liquidity tap" and structure-confirmation-time display.
     structure_time: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    # Candles making up the displacement/"explosive move" leg itself (origin
+    # swing through the structure-break bar) - the Overview pipeline card's
+    # "how many explosive candles formed" figure.
+    explosive_candle_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Human-readable reason(s) the pipeline stopped where it did (e.g. "No
     # BOS/CHOCH resolved the liquidity interaction within the search
     # window.") - engine.run_day always computes this (TradeResult.notes)

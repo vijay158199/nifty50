@@ -131,6 +131,7 @@ def run_day(
         result.status = TradeStatus.NO_SETUP
         result.notes.append("Could not build entry zones (no origin swing found for the displacement leg).")
         return result
+    result.leg_candle_count = zones.leg_candle_count
 
     entry = entries_mod.scan_for_entry(
         primary_1m,

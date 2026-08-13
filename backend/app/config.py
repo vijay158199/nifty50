@@ -103,6 +103,12 @@ class Settings(BaseSettings):
     # unused fallback (kept so this can be reverted by flipping this flag,
     # same pattern as entry_priority/require_choch_only).
     dynamic_risk_from_displacement: bool = True
+    # TP is the leg's own high/low PLUS this fraction of the leg's range
+    # projected further beyond it (0.5 = TP sits half a leg-range past the
+    # leg's own extreme) - explicit user spec (2026-08-12), matches entry
+    # already going to the FVG's 50% level or deeper. 0.0 = TP sits exactly
+    # at the leg's extreme (the pre-2026-08-12 behavior).
+    tp_extension_pct: float = 0.5
     stop_loss_points: float = 15.0
     take_profit_points: float = 30.0
     account_capital: float = 100_000.0
