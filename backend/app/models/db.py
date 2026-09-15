@@ -41,6 +41,7 @@ logger = logging.getLogger("nifty_strategy")
 def init_db() -> None:
     Base.metadata.create_all(engine)
     _migrate_trade_journal_columns()
+    _migrate_live_control_columns()
 
 
 def _migrate_trade_journal_columns() -> None:
@@ -57,6 +58,24 @@ def _migrate_trade_journal_columns() -> None:
             ("journal_notes", "ALTER TABLE trades ADD COLUMN journal_notes TEXT"),
             ("journal_rating", "ALTER TABLE trades ADD COLUMN journal_rating INTEGER"),
             ("journal_tags", "ALTER TABLE trades ADD COLUMN journal_tags VARCHAR(255)"),
+        ):
+            if col not in existing:
+                conn.exec_driver_sql(ddl)
+        conn.commit()
+
+
+def _migrate_live_control_columns() -> None:
+    """Same gap as _migrate_trade_journal_columns() above, but for
+    `live_control`: `structure_interval` and `skip_no_fvg_structure` were
+    added to the model after this table already existed on deployments from
+    before those features - without this, any read of the single live_control
+    row (e.g. every dashboard-home load, via live.control.get_status())
+    fails with "no such column" on those older, un-migrated databases."""
+    with engine.connect() as conn:
+        existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(live_control)")}
+        for col, ddl in (
+            ("structure_interval", "ALTER TABLE live_control ADD COLUMN structure_interval VARCHAR(4) DEFAULT '1m'"),
+            ("skip_no_fvg_structure", "ALTER TABLE live_control ADD COLUMN skip_no_fvg_structure BOOLEAN DEFAULT 0"),
         ):
             if col not in existing:
                 conn.exec_driver_sql(ddl)
