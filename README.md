@@ -125,7 +125,8 @@ in `backend/`. Key ones:
 | `account_capital` | 100000 | Used with `risk_pct_per_trade` to size positions |
 | `risk_pct_per_trade` | 1.0 | % of capital risked per trade |
 | `lot_size` | 75 | Points-to-currency multiplier per lot |
-| `stop_loss_points` / `take_profit_points` | 15 / 30 | Fixed risk management |
+| `stop_loss_points` | 15 | Fallback fixed SL distance (only used if `dynamic_risk_from_displacement=False`) |
+| `take_profit_rr_multiple` | 2.0 | TP = entry +/- this multiple of the actual SL distance (dynamic or fixed) |
 | `entry_priority` | FVG | Order entries are checked in; enters at the gap's 50% level or a deeper fill |
 | `require_displacement_candle` | True | Requires the BOS/CHOCH confirmation candle to have a long body (strong displacement) |
 | `require_smt_alignment` | False | If True, a setup is rejected without confirmed SMT divergence |

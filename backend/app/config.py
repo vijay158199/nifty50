@@ -106,21 +106,20 @@ class Settings(BaseSettings):
     skip_no_fvg_structure: bool = False
 
     # --- Risk management -------------------------------------------------
-    # If True (explicit user spec, 2026-08-11), SL/TP are set from the
+    # If True (explicit user spec, 2026-08-11), SL is set from the
     # displacement leg's own high/low instead of a fixed point distance -
-    # SL at the leg's origin (invalidates the setup if retaken), TP at the
-    # leg's own extreme. stop_loss_points/take_profit_points become an
-    # unused fallback (kept so this can be reverted by flipping this flag,
-    # same pattern as entry_priority/require_choch_only).
+    # the swing the move broke away from (invalidates the setup if
+    # retaken). stop_loss_points becomes an unused fallback (kept so this
+    # can be reverted by flipping this flag, same pattern as
+    # entry_priority/require_choch_only).
     dynamic_risk_from_displacement: bool = True
-    # TP is the leg's own high/low PLUS this fraction of the leg's range
-    # projected further beyond it (0.5 = TP sits half a leg-range past the
-    # leg's own extreme) - explicit user spec (2026-08-12), matches entry
-    # already going to the FVG's 50% level or deeper. 0.0 = TP sits exactly
-    # at the leg's extreme (the pre-2026-08-12 behavior).
-    tp_extension_pct: float = 0.5
+    # TP is a fixed reward multiple of the ACTUAL SL distance (dynamic
+    # leg-based or the fixed fallback, whichever applied) - explicit user
+    # spec (2026-09-15): "sl is default swing low and tp is 2x of sl",
+    # replacing the previous leg-extension model (TP = leg's own extreme +
+    # tp_extension_pct * leg range). 2.0 = a plain 1:2 risk/reward target.
+    take_profit_rr_multiple: float = 2.0
     stop_loss_points: float = 15.0
-    take_profit_points: float = 30.0
     account_capital: float = 100_000.0
     risk_pct_per_trade: float = 1.0        # percent of capital risked per trade
     lot_size: int = 75                     # NIFTY point value per lot

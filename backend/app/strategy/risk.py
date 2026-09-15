@@ -1,9 +1,11 @@
-"""Risk management: SL/TP either fixed-points (15/30 by default) or, per
-settings.dynamic_risk_from_displacement, set from the displacement leg's own
-high/low - the swing origin through the running extreme the leg reached
-before entry. Either way, position sizing is derived from the actual
-stop-loss distance and configured risk-per-trade, so a tighter dynamic stop
-sizes up and a wider one sizes down for the same rupee risk."""
+"""Risk management: SL either fixed-points (15 by default) or, per
+settings.dynamic_risk_from_displacement, the displacement leg's own origin
+swing - the swing price the impulsive move broke away from. TP is always a
+fixed reward multiple (settings.take_profit_rr_multiple, 2.0 by default) of
+that ACTUAL SL distance, whichever way it was derived. Position sizing is
+likewise derived from the actual stop-loss distance and configured
+risk-per-trade, so a tighter dynamic stop sizes up and a wider one sizes
+down for the same rupee risk."""
 from __future__ import annotations
 
 import math
@@ -20,28 +22,18 @@ def build_risk_plan(
 ) -> RiskPlan:
     if settings.dynamic_risk_from_displacement and leg_high is not None and leg_low is not None:
         # BUY: the leg ran up from leg_low - that origin invalidates the
-        # setup if retaken, so SL sits there. TP is the leg's own high
-        # PLUS settings.tp_extension_pct of the leg's range beyond it - an
-        # explicit user spec (2026-08-12): since entry is at the FVG's 50%
-        # level or a deeper fill, the target should likewise be the leg
-        # high or a further extension past it, not just the bare high.
-        # Mirrored for SELL.
-        leg_range = leg_high - leg_low
-        extension = settings.tp_extension_pct * leg_range
-        if direction is Direction.BUY:
-            stop_loss, take_profit = leg_low, leg_high + extension
-        else:
-            stop_loss, take_profit = leg_high, leg_low - extension
-        sl_points = abs(entry_price - stop_loss)
+        # setup if retaken, so SL sits there. Mirrored for SELL.
+        stop_loss = leg_low if direction is Direction.BUY else leg_high
     else:
-        sl_points = settings.stop_loss_points
-        tp_points = settings.take_profit_points
-        if direction is Direction.BUY:
-            stop_loss = entry_price - sl_points
-            take_profit = entry_price + tp_points
-        else:
-            stop_loss = entry_price + sl_points
-            take_profit = entry_price - tp_points
+        stop_loss = (
+            entry_price - settings.stop_loss_points
+            if direction is Direction.BUY
+            else entry_price + settings.stop_loss_points
+        )
+
+    sl_points = abs(entry_price - stop_loss)
+    rr = settings.take_profit_rr_multiple
+    take_profit = entry_price + rr * sl_points if direction is Direction.BUY else entry_price - rr * sl_points
 
     risk_amount = settings.account_capital * (settings.risk_pct_per_trade / 100.0)
     points_at_risk_per_lot = sl_points * settings.lot_size
