@@ -35,7 +35,11 @@ def _as_date(value: dt.date | dt.datetime | None) -> dt.date | None:
 def _get_or_create(session) -> LiveControl:
     row = session.get(LiveControl, _ROW_ID)
     if row is None:
-        row = LiveControl(id=_ROW_ID, enabled=False, structure_interval=settings.structure_interval)
+        row = LiveControl(
+            id=_ROW_ID, enabled=False,
+            structure_interval=settings.structure_interval,
+            skip_no_fvg_structure=settings.skip_no_fvg_structure,
+        )
         session.add(row)
         session.flush()
     elif row.structure_interval not in VALID_INTERVALS:
@@ -57,6 +61,7 @@ def get_status() -> dict:
             "updated_at": row.updated_at,
             "is_active_today": bool(row.enabled and _as_date(row.enabled_for_date) == today),
             "structure_interval": row.structure_interval,
+            "skip_no_fvg_structure": bool(row.skip_no_fvg_structure),
         }
 
 
@@ -71,6 +76,18 @@ def set_structure_interval(interval: str) -> None:
     with get_session() as session:
         row = _get_or_create(session)
         row.structure_interval = interval
+        row.updated_at = dt.datetime.utcnow()
+
+
+def get_skip_no_fvg_structure() -> bool:
+    with get_session() as session:
+        return bool(_get_or_create(session).skip_no_fvg_structure)
+
+
+def set_skip_no_fvg_structure(value: bool) -> None:
+    with get_session() as session:
+        row = _get_or_create(session)
+        row.skip_no_fvg_structure = value
         row.updated_at = dt.datetime.utcnow()
 
 

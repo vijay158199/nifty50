@@ -53,6 +53,7 @@ def run_day(
     symbol_label: str = settings.primary_label,
     reduced_resolution: bool = False,
     candle_interval_minutes: int = 1,
+    skip_no_fvg_structure: bool | None = None,
 ) -> TradeResult:
     """Runs the full pipeline for one session and returns a single
     TradeResult (possibly with status NO_SETUP if nothing qualified).
@@ -62,10 +63,17 @@ def run_day(
     interval they're actually sampled at (1 for "1m", 5 for "5m"), since
     it's used to convert `entry_search_minutes` into a bar count. Getting
     this wrong doesn't crash anything, but silently searches for way more
-    or less real time than configured."""
+    or less real time than configured.
+
+    `skip_no_fvg_structure` (None = use settings.skip_no_fvg_structure):
+    when True, a BOS/CHOCH that confirms but never gets an FVG entry
+    touched is skipped in favor of the NEXT BOS/CHOCH later in the same
+    session, instead of ending the day right there - kept OFF by default,
+    see settings.skip_no_fvg_structure for why."""
     result = TradeResult(trade_date=trade_date, symbol=symbol, symbol_label=symbol_label,
                           reduced_resolution=reduced_resolution)
     search_bar_limit = max(1, settings.entry_search_minutes // candle_interval_minutes)
+    skip_no_fvg = settings.skip_no_fvg_structure if skip_no_fvg_structure is None else skip_no_fvg_structure
 
     # --- Stage 1: first structure-interval interaction with the first candle's liquidity ---
     trigger = find_trigger(primary_30m, primary_1m, candle_minutes=settings.first_candle_minutes)
@@ -91,60 +99,87 @@ def run_day(
         result.notes.append("Trigger fired but no 1m candles followed it (end of data).")
         return result
 
-    # --- Stage 2: BOS (continuation) or CHOCH (reversal) determines direction ---
-    structure_event = structure_mod.detect_bos_choch(
-        onward_1m,
-        trigger.liquidity_side,
-        window=settings.swing_fractal_window,
-        search_bar_limit=search_bar_limit,
-    )
-    if structure_event is None:
-        result.status = TradeStatus.NO_SETUP
-        result.notes.append("No BOS/CHOCH resolved the liquidity interaction within the search window.")
-        return result
-    if settings.require_choch_only and structure_event.structure_type is not structure_mod.StructureType.CHOCH:
-        result.status = TradeStatus.NO_SETUP
-        result.notes.append(
-            f"{structure_event.signal_label} resolved the liquidity interaction, but only CHOCH "
-            "setups are traded per config; setup rejected."
+    # --- Stages 2-3: BOS/CHOCH structure, then entry timing -------------------
+    # A single pass unless skip_no_fvg is on, in which case a structure event
+    # that confirms but never gets an entry touched doesn't end the day - the
+    # search window advances past it and looks for the NEXT BOS/CHOCH instead.
+    search_window = onward_1m
+    skipped_no_fvg = 0
+    structure_event = zones = entry = None
+
+    while True:
+        structure_event = structure_mod.detect_bos_choch(
+            search_window,
+            trigger.liquidity_side,
+            window=settings.swing_fractal_window,
+            search_bar_limit=search_bar_limit,
         )
-        return result
+        if structure_event is None:
+            result.status = TradeStatus.NO_SETUP
+            result.notes.append(
+                "No BOS/CHOCH resolved the liquidity interaction within the search window."
+                + (f" ({skipped_no_fvg} earlier structure event(s) skipped for having no FVG entry.)" if skipped_no_fvg else "")
+            )
+            return result
+        if settings.require_choch_only and structure_event.structure_type is not structure_mod.StructureType.CHOCH:
+            result.status = TradeStatus.NO_SETUP
+            result.notes.append(
+                f"{structure_event.signal_label} resolved the liquidity interaction, but only CHOCH "
+                "setups are traded per config; setup rejected."
+            )
+            return result
+
+        # --- SMT divergence check (supportive by default, mandatory if configured) ---
+        confirm_onward = confirm_1m[confirm_1m.index <= structure_event.ts] if not confirm_1m.empty else confirm_1m
+        primary_onward_truncated = onward_1m[onward_1m.index <= structure_event.ts]
+        smt_found, smt_detail = check_smt_divergence(
+            primary_onward_truncated, confirm_onward, structure_event.direction, settings.swing_fractal_window
+        )
+        structure_event.smt_divergence = smt_found
+        structure_event.smt_detail = smt_detail
+        if settings.require_smt_alignment and not smt_found:
+            result.status = TradeStatus.NO_SETUP
+            result.notes.append("SMT divergence required by config but not found; setup rejected.")
+            return result
+
+        # --- Entry timing -------------------------------------------------
+        zones = entries_mod.build_entry_zones(primary_1m, structure_event, settings.swing_fractal_window)
+        entry = None
+        if zones is not None:
+            entry = entries_mod.scan_for_entry(
+                primary_1m,
+                structure_event,
+                zones,
+                priority=settings.entry_priority,
+                search_bar_limit=search_bar_limit,
+            )
+
+        if entry is not None:
+            break
+
+        if not skip_no_fvg:
+            result.status = TradeStatus.NO_SETUP
+            result.notes.append(
+                "Could not build entry zones (no origin swing found for the displacement leg)." if zones is None
+                else "Structure confirmed but no entry zone (per settings.entry_priority) was touched in time."
+            )
+            return result
+
+        # skip_no_fvg is on: ignore this structure event and keep looking
+        # forward for the next one within the same session.
+        skipped_no_fvg += 1
+        search_window = search_window[search_window.index > structure_event.ts]
+        if search_window.empty:
+            result.status = TradeStatus.NO_SETUP
+            result.notes.append(f"No further structure after skipping {skipped_no_fvg} BOS/CHOCH event(s) with no FVG entry.")
+            return result
+
     result.structure = structure_event
     result.direction = structure_event.direction
-
-    # --- SMT divergence check (supportive by default, mandatory if configured) ---
-    confirm_onward = confirm_1m[confirm_1m.index <= structure_event.ts] if not confirm_1m.empty else confirm_1m
-    primary_onward_truncated = onward_1m[onward_1m.index <= structure_event.ts]
-    smt_found, smt_detail = check_smt_divergence(
-        primary_onward_truncated, confirm_onward, structure_event.direction, settings.swing_fractal_window
-    )
-    structure_event.smt_divergence = smt_found
-    structure_event.smt_detail = smt_detail
-    if settings.require_smt_alignment and not smt_found:
-        result.status = TradeStatus.NO_SETUP
-        result.notes.append("SMT divergence required by config but not found; setup rejected.")
-        return result
-
-    # --- Stage 3: entry timing ------------------------------------------------
-    zones = entries_mod.build_entry_zones(primary_1m, structure_event, settings.swing_fractal_window)
-    if zones is None:
-        result.status = TradeStatus.NO_SETUP
-        result.notes.append("Could not build entry zones (no origin swing found for the displacement leg).")
-        return result
     result.leg_candle_count = zones.leg_candle_count
-
-    entry = entries_mod.scan_for_entry(
-        primary_1m,
-        structure_event,
-        zones,
-        priority=settings.entry_priority,
-        search_bar_limit=search_bar_limit,
-    )
-    if entry is None:
-        result.status = TradeStatus.NO_SETUP
-        result.notes.append("Structure confirmed but no entry zone (per settings.entry_priority) was touched in time.")
-        return result
     result.entry = entry
+    if skipped_no_fvg:
+        result.notes.append(f"Took this BOS/CHOCH after skipping {skipped_no_fvg} earlier one(s) with no FVG entry.")
 
     # --- Stage 4: risk management ---------------------------------------------
     risk_plan = build_risk_plan(entry.entry_price, structure_event.direction, zones.leg_high, zones.leg_low)

@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}Track Record{% endblock %}
+{% block page_title %}Track Record{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <div>
+      <h2>Backtest history + live trading, combined</h2>
+      <div class="card-sub">One continuous record: the selected backtest run's history, followed by every live-monitored day since</div>
+    </div>
+    <form method="get" class="form-row" style="align-items:center; gap:8px;">
+      <div class="field">
+        <label for="baseline">Backtest baseline</label>
+        <select id="baseline" name="baseline" onchange="this.form.submit()">
+          <option value="none" {% if selected_run_id is none %}selected{% endif %}>None &mdash; live trades only</option>
+          {% for run in runs %}
+          <option value="{{ run.id }}" {% if run.id == selected_run_id %}selected{% endif %}>
+            #{{ run.id }} &middot; {{ run.start_date.strftime('%d %b %Y') }}&ndash;{{ run.end_date.strftime('%d %b %Y') }} ({{ run.total_trades }} trades)
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <noscript><button class="btn small" type="submit">Apply</button></noscript>
+    </form>
+  </div>
+</div>
+
+<div class="tile-grid">
+  <div class="tile"><div class="tile-label">Combined Win Rate</div>
+    <div class="tile-value good">{{ "%.1f"|format(stats.combined.win_rate_pct) }}%</div>
+    <div class="tile-sub">{{ stats.combined.winning_trades }}W / {{ stats.combined.losing_trades }}L of {{ stats.combined.total_trades }} resolved trades</div></div>
+  <div class="tile"><div class="tile-label">Combined Net P/L</div>
+    <div class="tile-value {{ 'good' if stats.combined.net_profit_points > 0 else 'critical' }}">{{ "%+.1f"|format(stats.combined.net_profit_points) }} pts</div>
+    <div class="tile-sub num">&#8377;{{ "%.0f"|format(stats.combined.net_profit_amount) }}</div></div>
+  <div class="tile"><div class="tile-label">Backtest Baseline</div>
+    <div class="tile-value" style="font-size:18px;">{{ "%.1f"|format(stats.backtest.win_rate_pct) }}% <span style="color:var(--text-muted); font-size:12px; font-weight:500;">win rate</span></div>
+    <div class="tile-sub">{{ stats.backtest_trade_count }} day{{ '' if stats.backtest_trade_count == 1 else 's' }} &middot; {{ "%+.1f"|format(stats.backtest.net_profit_points) }} pts</div></div>
+  <div class="tile"><div class="tile-label">Live Trading (Real Time)</div>
+    <div class="tile-value" style="font-size:18px;">{{ "%.1f"|format(stats.live.win_rate_pct) }}% <span style="color:var(--text-muted); font-size:12px; font-weight:500;">win rate</span></div>
+    <div class="tile-sub">{{ stats.live_trade_count }} day{{ '' if stats.live_trade_count == 1 else 's' }} &middot; {{ "%+.1f"|format(stats.live.net_profit_points) }} pts</div></div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <div>
+      <h2>Combined Equity Curve</h2>
+      <div class="card-sub">
+        <span class="legend-swatch" style="background:var(--text-muted);"></span>Backtest baseline
+        <span class="legend-swatch" style="background:var(--status-good); margin-left:14px;"></span>Live trading
+      </div>
+    </div>
+  </div>
+  <div class="chart-wrap">
+    {% if equity_curve %}
+    <canvas id="combinedEquityChart"></canvas>
+    {% else %}
+    <div class="empty-state">No resolved trades yet - pick a backtest baseline above, or wait for the first live trade to resolve.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h2>Day-by-Day Log</h2><div class="card-sub">Every day, backtest and live, including no-setup days for full transparency</div></div>
+  <div class="card-body flush table-scroll">
+    {% if trades %}
+    <table class="data-table">
+      <thead>
+        <tr><th>Date</th><th>Source</th><th>Direction</th><th class="num">Entry</th><th class="num">Exit</th>
+            <th class="num">P/L (pts)</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {% for t in trades %}
+        <tr>
+          <td>{{ t.trade_date.strftime('%d %b %Y') }}</td>
+          <td>
+            {% if t.source == 'live' %}
+              <span class="pill good"><span class="pill-dot"></span>Live</span>
+            {% else %}
+              <span class="pill neutral"><span class="pill-dot"></span>Backtest</span>
+            {% endif %}
+          </td>
+          <td>{{ m.direction_badge(t.direction) }}</td>
+          <td class="num">{{ "%.1f"|format(t.entry_price) if t.entry_price else "-" }}</td>
+          <td class="num">{{ "%.1f"|format(t.exit_price) if t.exit_price else "-" }}</td>
+          <td class="num">{{ m.pnl_span(t.pnl_points) }}</td>
+          <td>{{ m.status_pill(t.status) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No trades yet.</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if equity_curve %}
+<script>
+  const curve = {{ equity_curve | tojson }};
+  const backtestPoints = {{ backtest_points | tojson }};
+  const styles = getComputedStyle(document.documentElement);
+  const good = styles.getPropertyValue('--status-good').trim();
+  const muted = styles.getPropertyValue('--text-muted').trim();
+  const grid = styles.getPropertyValue('--grid-line').trim();
+  const ink = styles.getPropertyValue('--text-secondary').trim();
+
+  const backtestSeries = curve.map((d, i) => (backtestPoints === 0 || i <= backtestPoints - 1) ? d.equity : null);
+  const liveSeries = curve.map((d, i) => (i >= backtestPoints - 1) ? d.equity : null);
+
+  new Chart(document.getElementById('combinedEquityChart'), {
+    type: 'line',
+    data: {
+      labels: curve.map(d => d.date),
+      datasets: [
+        {
+          label: 'Backtest',
+          data: backtestSeries,
+          borderColor: muted,
+          backgroundColor: muted + '1a',
+          fill: true, tension: 0.15, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2,
+        },
+        {
+          label: 'Live',
+          data: liveSeries,
+          borderColor: good,
+          backgroundColor: good + '22',
+          fill: true, tension: 0.15, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2,
+        },
+      ]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: grid }, ticks: { color: ink, maxTicksLimit: 8 } },
+        y: { grid: { color: grid }, ticks: { color: ink } },
+      }
+    }
+  });
+</script>
+{% endif %}
+{% endblock %}

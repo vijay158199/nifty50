@@ -40,6 +40,15 @@
       <a class="nav-link {% if active == 'backtest' %}active{% endif %}" href="/backtest">
         <span class="dot"></span> Backtest
       </a>
+      <a class="nav-link {% if active == 'performance' %}active{% endif %}" href="/performance">
+        <span class="dot"></span> Track Record
+      </a>
+      <a class="nav-link {% if active == 'journal' %}active{% endif %}" href="/journal">
+        <span class="dot"></span> Trader's Journal
+      </a>
+      <a class="nav-link {% if active == 'broker' %}active{% endif %}" href="/broker">
+        <span class="dot"></span> Broker
+      </a>
       <a class="nav-link {% if active == 'logs' %}active{% endif %}" href="/logs">
         <span class="dot"></span> Logs &amp; Health
       </a>
@@ -50,8 +59,8 @@
           <button type="button" id="theme-toggle" class="btn small" style="margin-left:auto; padding:4px 10px; font-size:12px;" title="Toggle light/dark theme"></button>
           <a href="/logout" class="btn small" style="padding:4px 10px; font-size:12px;">Logout</a>
         </div>
-        Signals only &middot; no live orders are ever placed.<br />
-        Data: Yahoo Finance (yfinance).
+        Signals run on Yahoo Finance data &middot; no order is ever placed automatically.<br />
+        Broker orders (optional) only fire when you submit one yourself.
       </div>
     </nav>
     <div class="nav-scrim" @click="navOpen = false"></div>

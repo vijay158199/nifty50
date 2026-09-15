@@ -177,8 +177,19 @@
       </div>
       <button class="btn" type="submit">Apply</button>
     </form>
+    <form class="form-row" hx-post="/api/live/skip-no-fvg" hx-swap="none" hx-on::after-request="window.location.reload()" style="margin-top: 12px;">
+      <div class="field">
+        <label for="live-skip-no-fvg">No-FVG BOS/CHOCH</label>
+        <select name="skip_no_fvg_structure" id="live-skip-no-fvg">
+          <option value="false" {% if not live_status.skip_no_fvg_structure %}selected{% endif %}>Stop at first (current default)</option>
+          <option value="true" {% if live_status.skip_no_fvg_structure %}selected{% endif %}>Skip to next BOS/CHOCH</option>
+        </select>
+      </div>
+      <button class="btn" type="submit">Apply</button>
+    </form>
     <div class="tile-sub" style="margin-top: 8px;">
-      Takes effect on the next poll &mdash; no restart needed. {{ settings.first_candle_minutes }}-min breakout/liquidity detection is unaffected either way.
+      Both take effect on the next poll &mdash; no restart needed. {{ settings.first_candle_minutes }}-min breakout/liquidity detection is unaffected either way.
+      Tested 2026-08-26 at 1m: "Skip to next" gave 43.5% win / +33.6pts over 23 trades vs. "Stop at first" (default) at 50.0% win / +40.1pts over 12 trades &mdash; no clear winner, your call.
     </div>
   </div>
 </div>

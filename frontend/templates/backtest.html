@@ -28,12 +28,21 @@
           {% endfor %}
         </select>
       </div>
+      <div class="field">
+        <label for="skip_no_fvg_structure">No-FVG BOS/CHOCH</label>
+        <select name="skip_no_fvg_structure" id="skip_no_fvg_structure">
+          <option value="false" {% if not default_skip_no_fvg_structure %}selected{% endif %}>Stop at first (current default)</option>
+          <option value="true" {% if default_skip_no_fvg_structure %}selected{% endif %}>Skip to next BOS/CHOCH</option>
+        </select>
+      </div>
       <button class="btn primary" type="submit">Run Backtest</button>
     </form>
     <div class="note" style="margin-top: 14px;">
       1m candles are only available from Yahoo Finance for the trailing ~30 days; older days automatically
       fall back to 5m for structure/entry detection (flagged "Reduced" in the results).
       {{ settings.first_candle_minutes }}-minute breakout/liquidity detection is unaffected either way.
+      "Skip to next BOS/CHOCH" tested 2026-08-26 at 1m: 43.5% win / +33.6pts over 23 trades vs. "Stop at
+      first" (default) at 50.0% win / +40.1pts over 12 trades - no clear winner, offered as a choice.
     </div>
     <div id="backtest-run-area" style="margin-top: 16px;"></div>
   </div>

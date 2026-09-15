@@ -4,7 +4,8 @@ A local Python + web application implementing the **First 30-Minute Breakout / L
 strategy on NIFTY 50, with BANKNIFTY used for SMT divergence confirmation. It runs a live signal
 monitor during market hours, a historical backtester, and a dashboard - all on your own machine.
 
-**This system only generates and logs signals. It never places real broker orders.**
+**Signal generation never places real broker orders on its own.** Connecting a broker account (Broker
+page) is opt-in and only ever places an order when you submit one yourself.
 
 ## Strategy Recap
 
@@ -32,12 +33,25 @@ backend/app/
   models/          # SQLAlchemy schema + DB session helper
   backtest/        # replays the engine over a date range, computes stats, writes the Excel workbook
   live/            # market-hours polling monitor + APScheduler jobs (session, daily 17:00 report)
-  reports/         # Excel report generation + per-trade chart snapshot rendering
+  reports/         # Excel report generation + per-trade chart snapshot rendering (dark, ICT-style PNGs)
+  broker/          # optional broker-account integration (adapter interface, Groww adapter, encrypted storage)
   api/              # FastAPI routes + read-side query helpers
 backend/tests/      # pytest unit tests for every strategy module (synthetic OHLC fixtures)
 frontend/           # Jinja2 templates + CSS + vendored htmx/Alpine/Chart.js (no Node/npm needed)
 data/                # created at runtime: sqlite DB, generated Excel reports, trade chart snapshots, logs
 ```
+
+## Dashboard Pages
+
+- **Overview** / **Trade History** / **Monthly Performance** / **Backtest** - as described above.
+- **Track Record** (`/performance`) - a chosen backtest run's history followed by every live-monitored day
+  since, as one continuous record: combined win rate, a combined equity curve (backtest portion and live
+  portion drawn in different colors), and a full day-by-day log.
+- **Trader's Journal** (`/journal`) - one card per taken live trade: a 1-5 self-graded execution rating,
+  free-text tags, and notes, plus aggregate analytics (win rate by weekday, tag frequency, current streak,
+  best/worst trade). Backtests aren't journaled - this page is about actual trading behavior.
+- **Broker** (`/broker`) - optional broker-account connection; see below.
+- **Logs & Health** - scheduler job status and the recent error log.
 
 ## Setup
 
@@ -125,8 +139,34 @@ The engine was smoke-tested against real recent NIFTY/BANKNIFTY data (not just s
 75-point max drawdown - not a suspiciously perfect record - which is what you'd expect from a real
 fixed-R:R momentum strategy rather than a look-ahead bug.
 
-## Future Enhancements (not built, by design - out of scope for a first version)
+## Broker Integration (Optional)
 
-- Real broker order execution (would need explicit re-authorization given this is currently signal-only).
+The Broker page (`/broker`) lets you connect a broker account. It's entirely opt-in and doesn't change how
+signals are generated or where market data comes from - both stay on Yahoo Finance either way. Connecting
+an account unlocks:
+
+- Viewing available/used margin and current holdings.
+- Placing a manual order (symbol, side, quantity, exchange/segment/product, market/limit price) that you
+  fill in and submit yourself, with a confirmation prompt first.
+
+**Groww** is the only broker wired up so far (via the official `growwapi` SDK). Angel One, Upstox, and Dhan
+are listed on the page as "coming soon" - adding one means writing a `BrokerAdapter`
+(`backend/app/broker/base.py`) and registering it in `backend/app/broker/registry.py`; the storage layer,
+routes, and template are already broker-agnostic.
+
+**Getting a Groww API key**: generate one from the
+[Groww Cloud API Keys page](https://groww.in/trade-api/api-keys) - either an API Key + Secret pair, or an
+API Key (TOTP token) + TOTP Secret. Either works from the Connect form.
+
+**Security**: credentials and the resulting access token are encrypted (Fernet/`cryptography`) before being
+stored in the DB, using a key persisted to `data/.broker_secret` (or pinned via `NIFTY_BROKER_ENC_KEY`) -
+a separate secret from the login session key. Nothing here is ever sent anywhere except directly to the
+broker's own API.
+
+## Future Enhancements (not built, by design - out of scope for this version)
+
+- Automated order execution tied directly to a strategy signal (today, connecting a broker only enables
+  *manual* orders you submit yourself - see Broker Integration above).
+- Angel One / Upstox / Dhan adapters (framework is in place; Groww is the only one wired up so far).
 - Multi-instrument support beyond NIFTY/BANKNIFTY.
 - User accounts/auth (currently single-user, localhost-only, no auth by design).

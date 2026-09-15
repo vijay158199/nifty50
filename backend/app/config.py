@@ -94,6 +94,16 @@ class Settings(BaseSettings):
     # of structure_interval - a bar count would silently mean 5x more real
     # time at 5m than at 1m.
     entry_search_minutes: int = 180        # stop looking for an entry after this many minutes from trigger
+    # If True, a BOS/CHOCH that confirms but never gets an FVG entry touched
+    # is skipped in favor of the NEXT BOS/CHOCH later in the same session,
+    # instead of ending the day at that first no-entry structure event -
+    # tested 2026-08-26 (43.5% win/+33.6pts/23 trades vs 50.0%/+40.1pts/12
+    # trades for "stop at first") and re-tested 2026-09-15 on a newer 29-day
+    # window (26.3% win/-44.3pts/19 trades vs 50.0%/+26.3pts/8 trades) - both
+    # runs favor "stop at first" clearly, so kept OFF by default. Still
+    # exposed as a live/backtest UI toggle since the user wanted the choice
+    # available, not because it tests better.
+    skip_no_fvg_structure: bool = False
 
     # --- Risk management -------------------------------------------------
     # If True (explicit user spec, 2026-08-11), SL/TP are set from the
@@ -178,3 +188,31 @@ def get_session_secret() -> str:
     secret = secrets.token_hex(32)
     secret_path.write_text(secret)
     return secret
+
+
+def get_broker_encryption_key() -> bytes:
+    """Symmetric key (Fernet-compatible, urlsafe-base64) used to encrypt
+    broker API credentials/tokens at rest in the DB - same persist-to-file
+    pattern as get_session_secret() above, but kept as a SEPARATE secret
+    (never reuse the session-signing key for data encryption) and pinnable
+    via NIFTY_BROKER_ENC_KEY for the same reason (survive a fresh volume).
+
+    Whatever the raw secret looks like (a hosting platform's auto-generated
+    env var value isn't guaranteed to already be in Fernet's exact 32-byte
+    urlsafe-base64 format), it's hashed down to one - so any string works as
+    input, deterministically, without weakening it (SHA-256 of a random
+    32-byte secret is still a strong 256-bit key)."""
+    import base64
+    import hashlib
+
+    env_secret = os.environ.get("NIFTY_BROKER_ENC_KEY")
+    if env_secret:
+        raw = env_secret
+    else:
+        key_path = DATA_DIR / ".broker_secret"
+        if key_path.exists():
+            raw = key_path.read_text().strip()
+        else:
+            raw = secrets.token_hex(32)
+            key_path.write_text(raw)
+    return base64.urlsafe_b64encode(hashlib.sha256(raw.encode("utf-8")).digest())

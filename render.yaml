@@ -25,3 +25,10 @@ services:
       # restart/sleep-wake cycle).
       - key: NIFTY_SESSION_SECRET
         generateValue: true
+      # Encrypts broker credentials/tokens at rest (Broker page, optional) -
+      # same ephemeral-disk reasoning as NIFTY_SESSION_SECRET above: without
+      # a stable key here, a redeploy would leave any connected broker
+      # account's stored token undecryptable, silently breaking the
+      # connection until reconnected.
+      - key: NIFTY_BROKER_ENC_KEY
+        generateValue: true

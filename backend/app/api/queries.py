@@ -299,3 +299,161 @@ def delete_backtest_run(run_id: int) -> bool:
         session.execute(sa_delete(Trade).where(Trade.backtest_run_id == run_id))
         session.delete(run)
     return True
+
+
+# --- Track Record (backtest baseline + live trading, combined) ------------
+
+def get_done_backtest_runs(limit: int = 25) -> list[dict]:
+    return [r for r in get_backtest_runs(limit) if r["status"] == "DONE"]
+
+
+def get_combined_trades(baseline_run_id: int | None, limit: int = 500) -> list[dict]:
+    """All trades that make up the "track record" page: every day from the
+    chosen backtest run (the pre-live history, if one is selected) followed
+    by every live-monitored day since - one continuous, chronologically
+    sorted log, each row tagged with its own `source` ("backtest"/"live")
+    so the page can badge them distinctly."""
+    baseline = get_backtest_trades(baseline_run_id) if baseline_run_id else []
+    live = get_live_trades(limit=100_000)
+    combined = baseline + live
+    combined.sort(key=lambda t: (t["trade_date"], t["id"]))
+    return combined[-limit:] if limit else combined
+
+
+def get_combined_stats(baseline_run_id: int | None) -> dict:
+    """Win rate / net P&L etc. computed three ways: over the backtest
+    baseline alone, over live trades alone, and over both combined - so the
+    Track Record page can show "how it did in backtesting vs how it's
+    actually trading live" side by side as well as the headline combined
+    number."""
+    baseline = get_backtest_trades(baseline_run_id) if baseline_run_id else []
+    live = get_live_trades(limit=100_000)
+    return {
+        "combined": compute_stats(baseline + live),
+        "backtest": compute_stats(baseline),
+        "live": compute_stats(live),
+        "backtest_trade_count": len(baseline),
+        "live_trade_count": len(live),
+    }
+
+
+def get_combined_equity_curve(baseline_run_id: int | None) -> tuple[list[dict], int]:
+    """Cumulative-points equity curve spanning the backtest baseline (if
+    any) followed by live trading, plus the index within that curve where
+    live trading takes over (0 if the whole curve is live, len(curve) if
+    there's no live data yet) - lets the page draw the backtest portion and
+    the live portion of the same continuous line in different colors."""
+    baseline = get_backtest_trades(baseline_run_id) if baseline_run_id else []
+    live = get_live_trades(limit=100_000)
+
+    def _resolved_sorted(trades: list[dict]) -> list[dict]:
+        return sorted(
+            (t for t in trades if t.get("status") in {"TARGET_HIT", "STOP_HIT", "MANUAL_EXIT"}),
+            key=lambda t: t["trade_date"],
+        )
+
+    bt_resolved = _resolved_sorted(baseline)
+    live_resolved = _resolved_sorted(live)
+
+    tagged = [("backtest", t) for t in bt_resolved] + [("live", t) for t in live_resolved]
+    curve: list[dict] = []
+    equity = 0.0
+    for source, t in tagged:
+        equity += t["pnl_points"] or 0.0
+        date = t["trade_date"]
+        curve.append({
+            "date": date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date),
+            "equity": round(equity, 1),
+            "source": source,
+        })
+    return curve, len(bt_resolved)
+
+
+# --- Trader's Journal (live trades only - a journal is about the trader's
+# own actually-taken trades, not backtested ones) --------------------------
+
+def get_journal_trades(limit: int = 200) -> list[dict]:
+    """Live trades where an entry was actually taken (excludes no-setup
+    days - nothing to journal about those), newest first."""
+    trades = get_live_trades(limit=100_000)
+    taken = [t for t in trades if t.get("entry_price") is not None]
+    return taken[:limit]
+
+
+def update_trade_journal(trade_id: int, notes: str | None, rating: int | None, tags: str | None) -> dict | None:
+    with get_session() as session:
+        trade = session.get(Trade, trade_id)
+        if trade is None:
+            return None
+        trade.journal_notes = notes or None
+        trade.journal_rating = rating
+        trade.journal_tags = tags or None
+        session.flush()
+        row = _row_to_dict(trade)
+    return row
+
+
+def get_journal_analytics() -> dict:
+    """Aggregate self-review stats for the Journal page: streaks, best/worst
+    trade, win rate by weekday, how much of the log has actually been
+    journaled, and tag frequency across whatever tags have been entered."""
+    taken = get_journal_trades(limit=100_000)
+    resolved = [t for t in taken if t.get("status") in {"TARGET_HIT", "STOP_HIT", "MANUAL_EXIT"} and t.get("pnl_points") is not None]
+    resolved_chrono = sorted(resolved, key=lambda t: t["trade_date"])
+
+    weekday_counts = {i: {"wins": 0, "trades": 0} for i in range(7)}
+    for t in resolved:
+        wd = t["trade_date"].weekday() if hasattr(t["trade_date"], "weekday") else None
+        if wd is None:
+            continue
+        weekday_counts[wd]["trades"] += 1
+        if (t["pnl_points"] or 0) > 0:
+            weekday_counts[wd]["wins"] += 1
+    weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    win_rate_by_weekday = [
+        {
+            "day": weekday_names[i],
+            "trades": weekday_counts[i]["trades"],
+            "win_rate_pct": (100.0 * weekday_counts[i]["wins"] / weekday_counts[i]["trades"]) if weekday_counts[i]["trades"] else None,
+        }
+        for i in range(5)  # NSE only trades Mon-Fri
+    ]
+
+    tag_freq: dict[str, int] = {}
+    ratings = []
+    journaled_count = 0
+    for t in taken:
+        if t.get("journal_notes") or t.get("journal_rating") or t.get("journal_tags"):
+            journaled_count += 1
+        if t.get("journal_rating"):
+            ratings.append(t["journal_rating"])
+        for tag in (t.get("journal_tags") or "").split(","):
+            tag = tag.strip()
+            if tag:
+                tag_freq[tag] = tag_freq.get(tag, 0) + 1
+
+    cur_streak_kind, cur_streak_len = None, 0
+    for t in reversed(resolved_chrono):
+        is_win = (t["pnl_points"] or 0) > 0
+        kind = "win" if is_win else "loss"
+        if cur_streak_kind is None:
+            cur_streak_kind, cur_streak_len = kind, 1
+        elif kind == cur_streak_kind:
+            cur_streak_len += 1
+        else:
+            break
+
+    best_trade = max(resolved, key=lambda t: t["pnl_points"] or 0.0, default=None)
+    worst_trade = min(resolved, key=lambda t: t["pnl_points"] or 0.0, default=None)
+
+    return {
+        "journaled_count": journaled_count,
+        "total_taken": len(taken),
+        "avg_rating": (sum(ratings) / len(ratings)) if ratings else None,
+        "tag_freq": dict(sorted(tag_freq.items(), key=lambda kv: -kv[1])),
+        "win_rate_by_weekday": win_rate_by_weekday,
+        "current_streak_kind": cur_streak_kind,
+        "current_streak_len": cur_streak_len,
+        "best_trade": best_trade,
+        "worst_trade": worst_trade,
+    }

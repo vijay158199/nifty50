@@ -1,0 +1,52 @@
+{% import "macros.html" as m %}
+<div class="journal-card" id="journal-card-{{ t.id }}">
+  <div class="journal-card-head">
+    <div class="journal-card-meta">
+      <span class="journal-date">{{ t.trade_date.strftime('%a, %d %b %Y') }}</span>
+      {{ m.direction_badge(t.direction) }}
+      {{ m.status_pill(t.status) }}
+      {{ m.pnl_span(t.pnl_points) }}
+      {% if t.journal_rating %}
+      <span class="pill neutral"><span class="pill-dot"></span>{{ t.journal_rating }}/5 execution</span>
+      {% endif %}
+    </div>
+    {% if t.snapshot_path %}
+    {% set fname = t.snapshot_path.split('\\')[-1].split('/')[-1] %}
+    <a href="/snapshots/{{ fname }}" target="_blank">
+      <img class="snap-thumb" src="/snapshots/{{ fname }}" alt="{{ t.trade_date.strftime('%d %b %Y') }} chart" />
+    </a>
+    {% endif %}
+  </div>
+
+  {% if t.journal_tags %}
+  <div class="journal-tags">
+    {% for tag in t.journal_tags.split(',') %}<span class="tag-chip">{{ tag }}</span>{% endfor %}
+  </div>
+  {% endif %}
+
+  <form class="journal-form" hx-post="/journal/{{ t.id }}" hx-target="#journal-card-{{ t.id }}" hx-swap="outerHTML">
+    <div class="form-row">
+      <div class="field" style="width:130px;">
+        <label for="rating-{{ t.id }}">Execution rating</label>
+        <select id="rating-{{ t.id }}" name="rating">
+          <option value="">&mdash;</option>
+          {% for n in range(1, 6) %}
+          <option value="{{ n }}" {% if t.journal_rating == n %}selected{% endif %}>{{ n }} / 5</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field" style="flex:1; min-width:220px;">
+        <label for="tags-{{ t.id }}">Tags (comma-separated)</label>
+        <input type="text" id="tags-{{ t.id }}" name="tags" value="{{ t.journal_tags or '' }}"
+               placeholder="e.g. followed-plan, fomo, oversized" />
+      </div>
+    </div>
+    <div class="field" style="margin-top:10px;">
+      <label for="notes-{{ t.id }}">Notes &mdash; what happened, what you'd repeat, what you'd change</label>
+      <textarea id="notes-{{ t.id }}" name="notes" rows="3" style="resize:vertical; padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border-strong); background:var(--surface); color:var(--text-primary); font-family:inherit; font-size:13px;">{{ t.journal_notes or '' }}</textarea>
+    </div>
+    <div style="margin-top:10px; display:flex; justify-content:flex-end;">
+      <button class="btn primary small" type="submit">Save Entry</button>
+    </div>
+  </form>
+</div>

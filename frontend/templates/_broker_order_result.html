@@ -1,0 +1,9 @@
+{% if ok %}
+<div class="note" style="color:var(--status-good); background:var(--status-good-wash);">
+  Order placed{% if order_id %} &mdash; broker order id <strong>{{ order_id }}</strong>{% endif %}.
+</div>
+{% else %}
+<div class="note">
+  Order failed: {{ error or "Unknown error." }}
+</div>
+{% endif %}

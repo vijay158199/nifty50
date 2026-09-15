@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Broker{% endblock %}
+{% block page_title %}Broker{% endblock %}
+
+{% block content %}
+<div class="note">
+  Fully optional. The strategy's signals and charts always run on Yahoo Finance data regardless of anything
+  below, and connecting an account never places a trade by itself - orders only go out when you fill in and
+  submit the form yourself, with a confirmation prompt first.
+</div>
+
+{% for b in brokers %}
+<div class="card" {% if not b.available %}style="opacity:0.6;"{% endif %}>
+  <div class="card-header">
+    <div>
+      <h2>{{ b.label }}</h2>
+      {% if not b.available %}
+        <div class="card-sub">Not wired up yet</div>
+      {% elif b.account and b.account.status == 'CONNECTED' %}
+        <div class="card-sub">Connected {{ b.account.label and ('as "' ~ b.account.label ~ '"') or '' }} &middot; last checked {{ b.account.last_checked_at.strftime('%d %b %Y %H:%M') if b.account.last_checked_at else '-' }}</div>
+      {% elif b.account and b.account.status == 'ERROR' %}
+        <div class="card-sub">Not connected</div>
+      {% else %}
+        <div class="card-sub">Not connected</div>
+      {% endif %}
+    </div>
+    {% if not b.available %}
+      <span class="pill neutral"><span class="pill-dot"></span>Coming soon</span>
+    {% elif b.account and b.account.status == 'CONNECTED' %}
+      <span class="pill good"><span class="pill-dot"></span>Connected</span>
+    {% elif b.account and b.account.status == 'ERROR' %}
+      <span class="pill critical"><span class="pill-dot"></span>Connection failed</span>
+    {% else %}
+      <span class="pill neutral"><span class="pill-dot"></span>Not connected</span>
+    {% endif %}
+  </div>
+
+  {% if b.available %}
+  <div class="card-body">
+    {% if b.account and b.account.status == 'ERROR' and b.account.last_error %}
+    <div class="note" style="margin-bottom:14px;">Last attempt failed: {{ b.account.last_error }}</div>
+    {% endif %}
+
+    {% if b.account and b.account.status == 'CONNECTED' %}
+      {% if b.fetch_error %}
+      <div class="note" style="margin-bottom:14px;">Couldn't refresh funds/holdings: {{ b.fetch_error }}</div>
+      {% endif %}
+
+      <div class="tile-grid" style="margin-bottom:16px;">
+        <div class="tile"><div class="tile-label">Available Margin</div>
+          <div class="tile-value">{{ "%.0f"|format(b.funds.available_margin) if b.funds and b.funds.available_margin is not none else "-" }}</div></div>
+        <div class="tile"><div class="tile-label">Used Margin</div>
+          <div class="tile-value">{{ "%.0f"|format(b.funds.used_margin) if b.funds and b.funds.used_margin is not none else "-" }}</div></div>
+        <div class="tile"><div class="tile-label">Holdings</div>
+          <div class="tile-value">{{ b.holdings|length if b.holdings is not none else "-" }}</div></div>
+      </div>
+
+      {% if b.holdings %}
+      <div class="table-scroll" style="margin-bottom:16px;">
+        <table class="data-table">
+          <thead><tr><th>Symbol</th><th class="num">Qty</th><th class="num">Avg Price</th><th class="num">LTP</th></tr></thead>
+          <tbody>
+            {% for h in b.holdings %}
+            <tr><td>{{ h.symbol }}</td><td class="num">{{ "%.0f"|format(h.quantity) }}</td>
+                <td class="num">{{ "%.2f"|format(h.avg_price) if h.avg_price is not none else "-" }}</td>
+                <td class="num">{{ "%.2f"|format(h.ltp) if h.ltp is not none else "-" }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      <details style="margin-bottom:16px;">
+        <summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-secondary);">Place a manual order</summary>
+        <form class="form-row" style="margin-top:12px;" x-data="{ orderType: 'MARKET' }"
+              hx-post="/broker/{{ b.id }}/order" hx-target="#order-result-{{ b.id }}" hx-swap="innerHTML"
+              hx-confirm="Submit this order to {{ b.label }} with real funds? This cannot be undone from here.">
+          <div class="field" style="width:120px;"><label>Symbol</label><input type="text" name="symbol" required placeholder="e.g. NIFTY" /></div>
+          <div class="field" style="width:100px;"><label>Side</label>
+            <select name="transaction_type"><option value="BUY">BUY</option><option value="SELL">SELL</option></select>
+          </div>
+          <div class="field" style="width:90px;"><label>Qty</label><input type="number" name="quantity" min="1" required /></div>
+          <div class="field" style="width:100px;"><label>Exchange</label>
+            <select name="exchange"><option value="NSE">NSE</option><option value="BSE">BSE</option></select>
+          </div>
+          <div class="field" style="width:100px;"><label>Segment</label>
+            <select name="segment"><option value="CASH">CASH</option><option value="FNO">F&amp;O</option></select>
+          </div>
+          <div class="field" style="width:100px;"><label>Product</label>
+            <select name="product"><option value="CNC">CNC</option><option value="MIS">MIS</option><option value="NRML">NRML</option></select>
+          </div>
+          <div class="field" style="width:110px;"><label>Order Type</label>
+            <select name="order_type" x-model="orderType">
+              <option value="MARKET">MARKET</option><option value="LIMIT">LIMIT</option>
+            </select>
+          </div>
+          <div class="field" style="width:110px;" x-show="orderType === 'LIMIT'"><label>Price</label><input type="number" step="0.05" name="price" /></div>
+          <button class="btn primary" type="submit">Place Order</button>
+        </form>
+        <div id="order-result-{{ b.id }}" style="margin-top:10px;"></div>
+      </details>
+
+      <form method="post" action="/broker/{{ b.id }}/disconnect" onsubmit="return confirm('Disconnect this {{ b.label }} account? You can reconnect any time.');">
+        <button class="btn danger small" type="submit">Disconnect</button>
+      </form>
+
+    {% else %}
+      <div x-data="{ method: 'secret' }">
+        <form class="form-row" method="post" action="/broker/{{ b.id }}/connect">
+          <div class="field" style="width:160px;"><label>Nickname (optional)</label><input type="text" name="label" placeholder="e.g. My Groww" /></div>
+          <div class="field" style="width:100%; max-width:260px;">
+            <label>Auth method</label>
+            <select x-model="method" style="padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border-strong); background:var(--surface); color:var(--text-primary);">
+              <option value="secret">Method A &mdash; API Key + Secret</option>
+              <option value="totp">Method B &mdash; API Key (TOTP Token) + TOTP Secret</option>
+            </select>
+          </div>
+          <div class="field" style="width:220px;">
+            <label x-text="method === 'totp' ? 'TOTP Token (as API Key)' : 'API Key'"></label>
+            <input type="text" name="api_key" required autocomplete="off" />
+          </div>
+          <div class="field" style="width:220px;" x-show="method === 'secret'">
+            <label>API Secret</label><input type="password" name="api_secret" autocomplete="off" />
+          </div>
+          <div class="field" style="width:220px;" x-show="method === 'totp'">
+            <label>TOTP Secret</label><input type="password" name="totp_secret" autocomplete="off" />
+          </div>
+          <button class="btn primary" type="submit">Connect</button>
+        </form>
+        <div class="tile-sub" style="margin-top:10px;">
+          Generate an API key (and either a secret or a TOTP token/secret) from the
+          <a href="https://groww.in/trade-api/api-keys" target="_blank" rel="noopener">Groww Cloud API Keys page</a>.
+          Credentials are encrypted before being stored.
+        </div>
+      </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

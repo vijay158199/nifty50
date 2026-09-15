@@ -18,6 +18,9 @@ matplotlib==3.10.0
 tenacity==9.0.0
 pytz==2024.2
 python-dateutil==2.9.0.post0
+cryptography==50.0.1
+growwapi==1.5.0
+pyotp==2.10.0
 
 # dev / test
 pytest==8.3.4

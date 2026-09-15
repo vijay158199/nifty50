@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block title %}Trader's Journal{% endblock %}
+{% block page_title %}Trader's Journal{% endblock %}
+
+{% block content %}
+<div class="tile-grid">
+  <div class="tile"><div class="tile-label">Journaled</div>
+    <div class="tile-value">{{ analytics.journaled_count }} / {{ analytics.total_taken }}</div>
+    <div class="tile-sub">Trades with a rating, tag, or note</div></div>
+  <div class="tile"><div class="tile-label">Avg. Execution Rating</div>
+    <div class="tile-value">{{ "%.1f"|format(analytics.avg_rating) if analytics.avg_rating else "-" }}<span style="font-size:14px; color:var(--text-muted);"> / 5</span></div>
+    <div class="tile-sub">Self-graded discipline, not P/L</div></div>
+  <div class="tile"><div class="tile-label">Current Streak</div>
+    {% if analytics.current_streak_kind %}
+    <div class="tile-value {{ 'good' if analytics.current_streak_kind == 'win' else 'critical' }}">{{ analytics.current_streak_len }} {{ analytics.current_streak_kind }}{{ 's' if analytics.current_streak_len != 1 else '' }}</div>
+    {% else %}
+    <div class="tile-value">&mdash;</div>
+    {% endif %}
+    <div class="tile-sub">Consecutive resolved trades</div></div>
+  <div class="tile"><div class="tile-label">Best / Worst Trade</div>
+    <div class="tile-value" style="font-size:18px;">
+      <span style="color:var(--status-good)">{{ "%+.1f"|format(analytics.best_trade.pnl_points) if analytics.best_trade else "-" }}</span>
+      /
+      <span style="color:var(--status-critical)">{{ "%+.1f"|format(analytics.worst_trade.pnl_points) if analytics.worst_trade else "-" }}</span>
+    </div>
+    <div class="tile-sub">Points, resolved live trades</div></div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h2>Win Rate by Weekday</h2><div class="card-sub">Resolved live trades only</div></div>
+  <div class="card-body flush table-scroll">
+    <table class="data-table">
+      <thead><tr>{% for row in analytics.win_rate_by_weekday %}<th>{{ row.day }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        <tr>
+          {% for row in analytics.win_rate_by_weekday %}
+          <td class="num">
+            {% if row.win_rate_pct is not none %}
+              {{ "%.0f"|format(row.win_rate_pct) }}% <span style="color:var(--text-muted); font-size:11px;">({{ row.trades }})</span>
+            {% else %}&mdash;{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if analytics.tag_freq %}
+<div class="card">
+  <div class="card-header"><h2>Tag Frequency</h2><div class="card-sub">What you tag your trades with most often</div></div>
+  <div class="card-body">
+    <div class="journal-tags">
+      {% for tag, count in analytics.tag_freq.items() %}
+      <span class="tag-chip">{{ tag }} &middot; {{ count }}</span>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header">
+    <div>
+      <h2>Trade Entries</h2>
+      <div class="card-sub">Every taken live trade, newest first &mdash; rate your execution, tag it, and write down what happened</div>
+    </div>
+  </div>
+  <div class="card-body">
+    {% if trades %}
+    <div class="journal-list">
+      {% for t in trades %}
+        {% include "_journal_card.html" %}
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">No trades taken yet. Once the live monitor enters a trade, it'll show up here to journal.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -27,6 +27,7 @@ def run_backtest(
     symbol_label: str = settings.primary_label,
     confirm_symbol: str = settings.confirm_symbol,
     structure_interval: str | None = None,
+    skip_no_fvg_structure: bool | None = None,
     generate_snapshots: bool = True,
     progress_cb: ProgressCallback | None = None,
     existing_run_id: int | None = None,
@@ -36,17 +37,21 @@ def run_backtest(
     a "running" status page against immediately - so this function reuses it
     instead of creating a duplicate.
 
-    `structure_interval` ("1m"/"2m"/"3m"/"5m") is explicit per-run rather than
-    read from global settings, so two backtests with different timeframes
-    can safely run concurrently (each in its own background thread) without
-    one clobbering the other's config."""
+    `structure_interval` ("1m"/"2m"/"3m"/"5m") and `skip_no_fvg_structure`
+    are explicit per-run rather than read from global settings, so two
+    backtests with different config can safely run concurrently (each in
+    its own background thread) without one clobbering the other's."""
     structure_interval = structure_interval or settings.structure_interval
+    skip_no_fvg_structure = settings.skip_no_fvg_structure if skip_no_fvg_structure is None else skip_no_fvg_structure
 
     if existing_run_id is not None:
         run_id = existing_run_id
     else:
         with get_session() as session:
-            run = BacktestRun(start_date=start_date, end_date=end_date, status="RUNNING", structure_interval=structure_interval)
+            run = BacktestRun(
+                start_date=start_date, end_date=end_date, status="RUNNING",
+                structure_interval=structure_interval, skip_no_fvg_structure=skip_no_fvg_structure,
+            )
             session.add(run)
             session.flush()
             run_id = run.id
@@ -73,6 +78,7 @@ def run_backtest(
                     symbol_label=symbol_label,
                     reduced_resolution=sd_primary.reduced_resolution,
                     candle_interval_minutes=INTERVAL_MINUTES.get(sd_primary.resolution, 1),
+                    skip_no_fvg_structure=skip_no_fvg_structure,
                 )
 
                 row = trade_result_to_row(result, source="backtest", backtest_run_id=run_id)

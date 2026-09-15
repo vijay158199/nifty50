@@ -94,6 +94,7 @@ def poll_once(trade_date: dt.date | None = None) -> dict:
 
     try:
         live_interval = control.get_structure_interval()
+        skip_no_fvg = control.get_skip_no_fvg_structure()
         sd_primary = get_session_data(settings.primary_symbol, trade_date, structure_interval=live_interval)
         sd_confirm = get_session_data(settings.confirm_symbol, trade_date, structure_interval=live_interval)
 
@@ -108,6 +109,7 @@ def poll_once(trade_date: dt.date | None = None) -> dict:
             sd_confirm.fine,
             reduced_resolution=sd_primary.reduced_resolution,
             candle_interval_minutes=INTERVAL_MINUTES.get(sd_primary.resolution, 1),
+            skip_no_fvg_structure=skip_no_fvg,
         )
 
         row = trade_result_to_row(result, source="live")

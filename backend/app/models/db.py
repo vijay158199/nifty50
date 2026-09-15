@@ -40,6 +40,27 @@ logger = logging.getLogger("nifty_strategy")
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _migrate_trade_journal_columns()
+
+
+def _migrate_trade_journal_columns() -> None:
+    """create_all() only creates missing TABLES, not missing columns on
+    tables that already exist - the DB already had `trades` before the
+    Journal page's self-graded fields were added (2026-09-14), so a fresh
+    SQLite/libSQL-compatible ALTER TABLE is needed to backfill them on
+    existing deployments. Idempotent: skips columns that are already there
+    (a from-scratch DB gets them from create_all instead and this is a
+    no-op)."""
+    with engine.connect() as conn:
+        existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(trades)")}
+        for col, ddl in (
+            ("journal_notes", "ALTER TABLE trades ADD COLUMN journal_notes TEXT"),
+            ("journal_rating", "ALTER TABLE trades ADD COLUMN journal_rating INTEGER"),
+            ("journal_tags", "ALTER TABLE trades ADD COLUMN journal_tags VARCHAR(255)"),
+        ):
+            if col not in existing:
+                conn.exec_driver_sql(ddl)
+        conn.commit()
 
 
 @contextmanager
