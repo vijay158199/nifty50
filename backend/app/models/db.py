@@ -40,45 +40,41 @@ logger = logging.getLogger("nifty_strategy")
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
-    _migrate_trade_journal_columns()
-    _migrate_live_control_columns()
+    _migrate_missing_columns()
 
 
-def _migrate_trade_journal_columns() -> None:
-    """create_all() only creates missing TABLES, not missing columns on
-    tables that already exist - the DB already had `trades` before the
-    Journal page's self-graded fields were added (2026-09-14), so a fresh
-    SQLite/libSQL-compatible ALTER TABLE is needed to backfill them on
-    existing deployments. Idempotent: skips columns that are already there
-    (a from-scratch DB gets them from create_all instead and this is a
-    no-op)."""
+# create_all() only creates missing TABLES, not missing COLUMNS on tables
+# that already exist - each entry here is a column that was added to a
+# model after its table was already live on some deployment (Render's Turso
+# DB in particular), which otherwise fails every read of that table with
+# "no such column". Hit twice already (trades' journal_* fields, then
+# live_control's structure_interval/skip_no_fvg_structure) before this table
+# replaced two near-identical one-off functions - add a row here instead of
+# writing a third when the next column joins an existing table.
+_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
+    ("trades", "journal_notes", "ALTER TABLE trades ADD COLUMN journal_notes TEXT"),
+    ("trades", "journal_rating", "ALTER TABLE trades ADD COLUMN journal_rating INTEGER"),
+    ("trades", "journal_tags", "ALTER TABLE trades ADD COLUMN journal_tags VARCHAR(255)"),
+    ("live_control", "structure_interval", "ALTER TABLE live_control ADD COLUMN structure_interval VARCHAR(4) DEFAULT '1m'"),
+    ("live_control", "skip_no_fvg_structure", "ALTER TABLE live_control ADD COLUMN skip_no_fvg_structure BOOLEAN DEFAULT 0"),
+    ("backtest_runs", "structure_interval", "ALTER TABLE backtest_runs ADD COLUMN structure_interval VARCHAR(4) DEFAULT '1m'"),
+    ("backtest_runs", "skip_no_fvg_structure", "ALTER TABLE backtest_runs ADD COLUMN skip_no_fvg_structure BOOLEAN DEFAULT 0"),
+]
+
+
+def _migrate_missing_columns() -> None:
+    """Backfills each _COLUMN_MIGRATIONS entry onto tables that already
+    existed before that column was added to the model. Idempotent - skips
+    any column already present, so a from-scratch DB (where create_all()
+    made the column from day one) is a no-op."""
     with engine.connect() as conn:
-        existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(trades)")}
-        for col, ddl in (
-            ("journal_notes", "ALTER TABLE trades ADD COLUMN journal_notes TEXT"),
-            ("journal_rating", "ALTER TABLE trades ADD COLUMN journal_rating INTEGER"),
-            ("journal_tags", "ALTER TABLE trades ADD COLUMN journal_tags VARCHAR(255)"),
-        ):
-            if col not in existing:
+        existing_by_table: dict[str, set[str]] = {}
+        for table, col, ddl in _COLUMN_MIGRATIONS:
+            if table not in existing_by_table:
+                existing_by_table[table] = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            if col not in existing_by_table[table]:
                 conn.exec_driver_sql(ddl)
-        conn.commit()
-
-
-def _migrate_live_control_columns() -> None:
-    """Same gap as _migrate_trade_journal_columns() above, but for
-    `live_control`: `structure_interval` and `skip_no_fvg_structure` were
-    added to the model after this table already existed on deployments from
-    before those features - without this, any read of the single live_control
-    row (e.g. every dashboard-home load, via live.control.get_status())
-    fails with "no such column" on those older, un-migrated databases."""
-    with engine.connect() as conn:
-        existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(live_control)")}
-        for col, ddl in (
-            ("structure_interval", "ALTER TABLE live_control ADD COLUMN structure_interval VARCHAR(4) DEFAULT '1m'"),
-            ("skip_no_fvg_structure", "ALTER TABLE live_control ADD COLUMN skip_no_fvg_structure BOOLEAN DEFAULT 0"),
-        ):
-            if col not in existing:
-                conn.exec_driver_sql(ddl)
+                existing_by_table[table].add(col)
         conn.commit()
 
 
