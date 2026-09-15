@@ -17,6 +17,7 @@ import matplotlib
 
 matplotlib.use("Agg")  # headless - this runs inside a scheduler/web server, never a GUI session
 import matplotlib.pyplot as plt
+import matplotlib.transforms as mtransforms
 import mplfinance as mpf
 import pandas as pd
 
@@ -101,6 +102,28 @@ def _chart_style():
             "grid.alpha": 0.5,
         },
     )
+
+
+def _trade_focus_window(result: TradeResult, candles_fine: pd.DataFrame) -> pd.DataFrame:
+    """Crops to a tight window around the actual setup - from a bit before
+    the liquidity trigger through a bit after the exit (or through the last
+    available candle if still open) - instead of the full session. Without
+    this, a chart grabbed hours after a trade resolved (e.g. for sharing)
+    buries a 30-40pt setup inside a 400-500pt full-day axis, squeezing
+    every level/marker into an unreadable sliver at one edge. Falls back to
+    the full session when there's no entry yet to focus on."""
+    if result.entry is None or candles_fine.empty:
+        return candles_fine
+
+    interval_minutes = 1
+    if len(candles_fine) > 1:
+        interval_minutes = max(1, int((candles_fine.index[1] - candles_fine.index[0]).total_seconds() // 60))
+    pad = dt.timedelta(minutes=max(15, interval_minutes * 8))
+
+    window_start = (result.trigger.trigger_time if result.trigger else result.entry.entry_time) - pad
+    window_end = (result.exit_time or result.entry.entry_time) + pad
+    windowed = candles_fine[(candles_fine.index >= window_start) & (candles_fine.index <= window_end)]
+    return windowed if not windowed.empty else candles_fine
 
 
 def _nearest_pos(index: pd.DatetimeIndex, ts: dt.datetime) -> int | None:
@@ -189,9 +212,53 @@ def _annotate_levels(fig, ax, result: TradeResult) -> None:
         alpha = 0.55 if color == _SWING else 0.85
         ax.axhline(y=price, color=color, linestyle=style, linewidth=1, alpha=alpha, zorder=2)
 
-    caption_parts.extend(f"{label} {price:,.1f}" for label, price, _ in items)
-    fig.text(0.012, 0.895, "    ".join(caption_parts), fontsize=8.5, fontweight="600",
-              color=_TEXT_MUTED, ha="left", va="top", family="sans-serif")
+    if caption_parts:
+        fig.text(0.012, 0.895, "    ".join(caption_parts), fontsize=8.5, fontweight="600",
+                  color=_TEXT_MUTED, ha="left", va="top", family="sans-serif")
+
+    _label_levels_on_axis(ax, items)
+
+
+def _label_levels_on_axis(ax, items: list[tuple[str, float, str]]) -> None:
+    """Small colored price tags right on the axes' edge, at each level's own
+    price - so a viewer maps color straight to level without cross-
+    referencing the header caption. This is the main thing that makes a
+    shared snapshot teach anything: the SL/TP/Entry/Swing lines are
+    identified right where they sit, not just spelled out in text elsewhere.
+    De-collides labels that would otherwise land on top of each other (a
+    dynamic stop often sits at the exact same price as the broken swing)."""
+    if not items:
+        return
+    y_bottom, y_top = ax.get_ylim()
+    y_span = max(y_top - y_bottom, 1e-6)
+    min_gap = y_span * 0.06
+
+    ordered = sorted(items, key=lambda it: -it[1])
+    label_ys: list[float] = []
+    for _, price, _ in ordered:
+        y = price if not label_ys else min(price, label_ys[-1] - min_gap)
+        label_ys.append(y)
+
+    trans = mtransforms.blended_transform_factory(ax.transAxes, ax.transData)
+    for (label, price, color), y in zip(ordered, label_ys):
+        ax.annotate(
+            f" {label} {price:,.1f} ",
+            xy=(1.0, y), xycoords=trans, va="center", ha="left",
+            fontsize=7.5, fontweight="bold", color=_BG,
+            bbox=dict(boxstyle="round,pad=0.28", fc=color, ec="none", alpha=0.95),
+            annotation_clip=False, zorder=6,
+        )
+
+
+_GLOSSARY = "CHOCH = reversal · BOS = continuation · FVG = entry zone · SL/TP = risk / target"
+
+
+def _annotate_glossary(fig) -> None:
+    """One small line spelling out the ICT/SMC jargon in plain terms - the
+    difference between a chart only the strategy's author can read and one a
+    social-media follower with no prior context can actually learn from."""
+    fig.text(0.012, 0.015, _GLOSSARY, fontsize=6.3, color=_TEXT_MUTED,
+              alpha=0.75, ha="left", va="bottom", family="sans-serif")
 
 
 def _annotate_structure(ax, y_top: float, y_span: float, plot_candles: pd.DataFrame, result: TradeResult) -> None:
@@ -275,19 +342,7 @@ def render_trade_snapshot(result: TradeResult, candles_fine: pd.DataFrame) -> st
     if result.entry is None or result.risk is None or candles_fine.empty:
         return None
 
-    # Pad by ~8 candles' worth of time either side, not a fixed 15 minutes -
-    # at 5m that's 40 minutes (still 8 candles of context); a flat 15min
-    # would only show 3 candles of padding and look too cropped.
-    interval_minutes = 1
-    if len(candles_fine) > 1:
-        interval_minutes = max(1, int((candles_fine.index[1] - candles_fine.index[0]).total_seconds() // 60))
-    pad = dt.timedelta(minutes=max(15, interval_minutes * 8))
-
-    window_start = (result.trigger.trigger_time if result.trigger else result.entry.entry_time) - pad
-    window_end = (result.exit_time or result.entry.entry_time) + pad
-    plot_candles = candles_fine[(candles_fine.index >= window_start) & (candles_fine.index <= window_end)]
-    if plot_candles.empty:
-        plot_candles = candles_fine
+    plot_candles = _trade_focus_window(result, candles_fine)
 
     filename = f"{result.trade_date.isoformat()}_{result.symbol.strip('^')}_{result.entry.entry_time.strftime('%H%M')}.png"
     out_path = settings.snapshots_dir / filename
@@ -305,6 +360,7 @@ def render_trade_snapshot(result: TradeResult, candles_fine: pd.DataFrame) -> st
     _annotate_levels(fig, ax, result)
     _annotate_structure(ax, y_top, y_span, plot_candles, result)
     _annotate_entry_marker(ax, plot_candles, result, y_span)
+    _annotate_glossary(fig)
 
     fig.savefig(out_path, dpi=160, facecolor=_BG, bbox_inches="tight")
     plt.close(fig)
@@ -314,21 +370,25 @@ def render_trade_snapshot(result: TradeResult, candles_fine: pd.DataFrame) -> st
 
 def render_live_chart(result: TradeResult, candles_fine: pd.DataFrame) -> bytes | None:
     """Live counterpart to render_trade_snapshot for the overview page's
-    "Today's Live Chart" card: renders the FULL session so far (not a
-    cropped window) and doesn't require a resolved (or even found) trade -
-    shows just the liquidity band on a NO_SETUP day, adds the structure
-    marker once structure resolves, and the entry zone/SL/TP once an entry
-    is found. Returns PNG bytes directly (not saved to disk - this is
-    regenerated fresh on every request, not archived per-trade)."""
+    "Today's Live Chart" card: renders the full session so far while still
+    watching for a setup (nothing meaningful to crop to yet), but switches
+    to the same tight, trade-focused window as render_trade_snapshot once an
+    entry exists - otherwise a chart grabbed well after a trade resolves
+    (e.g. for sharing) keeps stretching to the full day's range long after
+    the setup itself has become an unreadable sliver at one edge. Returns
+    PNG bytes directly (not saved to disk - this is regenerated fresh on
+    every request, not archived per-trade)."""
     if candles_fine.empty:
         return None
 
+    plot_candles = _trade_focus_window(result, candles_fine)
+
     fig, axlist = mpf.plot(
-        candles_fine, type="candle", style=_chart_style(), returnfig=True, figsize=(10.2, 5.2),
+        plot_candles, type="candle", style=_chart_style(), returnfig=True, figsize=(10.2, 5.2),
     )
     ax = axlist[0]
     _reserve_header_band(fig)
-    x_last, y_top, y_span = _finalize_axes(ax, candles_fine, result)
+    x_last, y_top, y_span = _finalize_axes(ax, plot_candles, result)
 
     subtitle = f"{result.symbol_label} · {result.trade_date.strftime('%d %b %Y')}"
     if result.direction is not None:
@@ -338,8 +398,9 @@ def render_live_chart(result: TradeResult, candles_fine: pd.DataFrame) -> bytes 
     _annotate_header(fig, ax, result, subtitle)
     _annotate_liquidity(ax, result)
     _annotate_levels(fig, ax, result)
-    _annotate_structure(ax, y_top, y_span, candles_fine, result)
-    _annotate_entry_marker(ax, candles_fine, result, y_span)
+    _annotate_structure(ax, y_top, y_span, plot_candles, result)
+    _annotate_entry_marker(ax, plot_candles, result, y_span)
+    _annotate_glossary(fig)
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, facecolor=_BG, bbox_inches="tight")
