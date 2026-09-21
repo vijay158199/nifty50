@@ -44,6 +44,28 @@ class Settings(BaseSettings):
     first_candle_minutes: int = 60
     timezone: str = "Asia/Kolkata"
 
+    # --- Bias source (stage 1) -------------------------------------------
+    # "RSI"           - the day's bias comes from an RSI line break (rsi.py).
+    # "FIRST_CANDLE"  - the original model: the first candle's high/low being
+    #                   swept (breakout_sweep.py).
+    # Kept switchable so the backtest history built under the old model stays
+    # reproducible rather than being silently invalidated.
+    bias_source: str = "RSI"
+    rsi_period: int = 14
+    rsi_overbought: float = 70.0
+    rsi_oversold: float = 30.0
+    # Which reading of "RSI breaking the top/bottom line" applies. These are
+    # opposite strategies, not variations - see rsi.py's module docstring.
+    #   "reversal" - RSI crossing back UP through oversold = buying pressure
+    #   "momentum" - RSI pushing UP through overbought = buying pressure
+    rsi_bias_mode: str = "reversal"
+    # Explicit user spec: don't look at anything before 09:30.
+    rsi_scan_start: str = "09:30"
+    # How long an RSI bias stays actionable. If no market structure shift
+    # confirms it within this many minutes, the day produces no signal rather
+    # than trading a bias set hours earlier.
+    rsi_bias_expiry_minutes: int = 60
+
     # --- Strategy parameters -------------------------------------------
     # Structure/entry/exit granularity below the 60m liquidity levels.
     # Default 1m; also selectable per live-session/backtest-run: 2m, 3m, 5m
@@ -66,9 +88,13 @@ class Settings(BaseSettings):
     # (57.1% win, +49.6pts) - not used.
     swing_fractal_window: int = 2
     require_smt_alignment: bool = False    # if True, SMT divergence is mandatory, not just supportive
-    # If True, BOS-classified setups (continuation) are rejected as
-    # NO_SETUP - only CHOCH (reversal) setups are ever traded.
-    require_choch_only: bool = False
+    # If True, BOS-classified setups (continuation) are never traded - only
+    # CHOCH, which is this codebase's market structure shift. Default flipped
+    # to True (2026-09-21) per explicit user spec: "bos happening that time
+    # dont take trade wait mss". Note "wait", not "give up" - see
+    # engine.run_day, which now scans PAST a BOS for a later MSS in the same
+    # session instead of ending the day at the first BOS.
+    require_choch_only: bool = True
     # If True, a BOS/CHOCH break only counts once the breaking candle itself
     # shows strong displacement (a "long body"), not just any close beyond
     # the swing point - see structure._is_displacement_candle. Explicit user
@@ -125,6 +151,24 @@ class Settings(BaseSettings):
     lot_size: int = 75                     # NIFTY point value per lot
 
     # --- Data ------------------------------------------------------------
+    # "upstox" (default, per explicit user instruction 2026-09-21) or
+    # "yfinance". Upstox serves 1m candles from January 2022; Yahoo only
+    # covers the trailing ~30 days, which silently degraded older backtest
+    # days to 5m. yfinance is kept selectable so previously cached runs stay
+    # reproducible, not because it should be used.
+    data_provider: str = "upstox"
+    # Generate an ANALYTICS token (1-year, read-only, no daily login) rather
+    # than a standard access token, which expires at 3:30 AM IST every day.
+    # Set via the NIFTY_UPSTOX_ACCESS_TOKEN env var - never commit it.
+    upstox_access_token: str = ""
+    # yfinance ticker -> Upstox instrument key, so the rest of the app (and
+    # the existing candle cache) can keep using the tickers as its symbol ids.
+    # Worth re-checking against Upstox's daily instrument master if a fetch
+    # ever 404s: the exact spelling of index keys has changed before.
+    upstox_instrument_keys: dict[str, str] = {
+        "^NSEI": "NSE_INDEX|Nifty 50",
+        "^NSEBANK": "NSE_INDEX|Nifty Bank",
+    }
     yfinance_1m_lookback_days: int = 30    # Yahoo hard limit for 1m candles (only relevant if structure_interval="1m")
     yfinance_5m_lookback_days: int = 60    # Yahoo hard limit for 5m candles (30m candles are derived from these)
     candle_cache_ttl_minutes: int = 5

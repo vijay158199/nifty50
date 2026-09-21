@@ -1,9 +1,10 @@
 """Orchestrates the full pipeline for a single trading day:
 
-  settings.first_candle_minutes first-candle (60m by default - see that
-  setting's comment for why) -> first liquidity interaction (high or low
-  touched), detected on `settings.structure_interval` candles (1m by
-  default, also selectable per live-session/backtest-run as 2m/3m/5m)
+  directional bias (settings.bias_source) - either an RSI line break after
+  settings.rsi_scan_start (the "RSI" default, see rsi.py) or the original
+  first-candle liquidity sweep ("FIRST_CANDLE", see breakout_sweep.py),
+  detected on `settings.structure_interval` candles (1m by default, also
+  selectable per live-session/backtest-run as 2m/3m/5m)
     -> structure on the same interval (BOS = continuation, CHOCH = reversal),
       requiring the confirming candle itself to show strong displacement (a
       "long body") by default (see structure.detect_bos_choch) - derives
@@ -20,9 +21,17 @@
             fallback - see risk.build_risk_plan
             -> exit simulation (SL/TP walk-forward on the same candles)
 
-Trade direction is NOT known until the structure stage resolves - the
-trigger only flags which liquidity level was touched first, not which way
-to trade it. See breakout_sweep.find_trigger and structure.detect_bos_choch.
+A trade is only ever taken on a structure event. Under
+settings.require_choch_only (the default) that means a CHOCH - this
+codebase's market structure shift - and a BOS along the way is stepped over
+rather than ending the day, matching "dont take trade wait mss".
+
+In FIRST_CANDLE mode the direction is not known until the structure stage
+resolves; the trigger only flags which liquidity level was touched first. In
+RSI mode the bias direction is known up front but is still expressed as the
+liquidity side whose CHOCH resolves that way, so the structure stage stays
+the single place a direction is confirmed. See rsi.find_rsi_trigger,
+breakout_sweep.find_trigger and structure.detect_bos_choch.
 
 This module is shared verbatim by the live monitor and the backtester - the
 only difference is where the candle DataFrames come from (a live poll vs. a
@@ -37,11 +46,19 @@ import pandas as pd
 
 from app.config import settings
 from app.strategy import entries as entries_mod
+from app.strategy import rsi as rsi_mod
 from app.strategy import structure as structure_mod
 from app.strategy.breakout_sweep import find_trigger
 from app.strategy.risk import build_risk_plan
 from app.strategy.smt import check_smt_divergence
 from app.strategy.types import Direction, StructureType, TradeResult, TradeStatus
+
+
+def _parse_hhmm(value: str) -> dt.time:
+    """"09:30" -> time(9, 30). Kept here rather than in config so the setting
+    stays a plain string that env vars can override without a custom parser."""
+    hh, mm = value.split(":")
+    return dt.time(int(hh), int(mm))
 
 
 def run_day(
@@ -75,13 +92,40 @@ def run_day(
     search_bar_limit = max(1, settings.entry_search_minutes // candle_interval_minutes)
     skip_no_fvg = settings.skip_no_fvg_structure if skip_no_fvg_structure is None else skip_no_fvg_structure
 
-    # --- Stage 1: first structure-interval interaction with the first candle's liquidity ---
-    trigger = find_trigger(primary_30m, primary_1m, candle_minutes=settings.first_candle_minutes)
+    # --- Stage 1: establish the day's directional bias ----------------------
+    # Either an RSI line break (settings.bias_source="RSI", the default) or
+    # the original first-candle liquidity sweep. Both produce a TriggerEvent
+    # whose liquidity_side drives the structure stage identically, so nothing
+    # downstream of here needs to know which model ran.
+    if settings.bias_source.upper() == "RSI":
+        trigger = rsi_mod.find_rsi_trigger(
+            primary_1m,
+            period=settings.rsi_period,
+            overbought=settings.rsi_overbought,
+            oversold=settings.rsi_oversold,
+            mode=settings.rsi_bias_mode,
+            scan_start=_parse_hhmm(settings.rsi_scan_start),
+        )
+        no_trigger_note = (
+            f"RSI({settings.rsi_period}) never crossed {settings.rsi_oversold:.0f}/"
+            f"{settings.rsi_overbought:.0f} in '{settings.rsi_bias_mode}' mode after "
+            f"{settings.rsi_scan_start}."
+        )
+        # An RSI bias is a short-lived read on the tape, so the structure
+        # shift that confirms it has its own (usually tighter) deadline -
+        # settings.rsi_bias_expiry_minutes, not entry_search_minutes.
+        structure_bar_limit = max(1, settings.rsi_bias_expiry_minutes // candle_interval_minutes)
+    else:
+        trigger = find_trigger(primary_30m, primary_1m, candle_minutes=settings.first_candle_minutes)
+        no_trigger_note = (
+            f"Neither the first {settings.first_candle_minutes}m candle's high nor low "
+            "was touched during the session."
+        )
+        structure_bar_limit = search_bar_limit
+
     if trigger is None:
         result.status = TradeStatus.NO_SETUP
-        result.notes.append(
-            f"Neither the first {settings.first_candle_minutes}m candle's high nor low was touched during the session."
-        )
+        result.notes.append(no_trigger_note)
         return result
     result.trigger = trigger
 
@@ -105,6 +149,7 @@ def run_day(
     # search window advances past it and looks for the NEXT BOS/CHOCH instead.
     search_window = onward_1m
     skipped_no_fvg = 0
+    skipped_bos = 0
     structure_event = zones = entry = None
 
     while True:
@@ -112,22 +157,36 @@ def run_day(
             search_window,
             trigger.liquidity_side,
             window=settings.swing_fractal_window,
-            search_bar_limit=search_bar_limit,
+            search_bar_limit=structure_bar_limit,
         )
         if structure_event is None:
+            reasons = []
+            if skipped_bos:
+                reasons.append(f"{skipped_bos} BOS skipped while waiting for an MSS")
+            if skipped_no_fvg:
+                reasons.append(f"{skipped_no_fvg} structure event(s) skipped for having no FVG entry")
             result.status = TradeStatus.NO_SETUP
             result.notes.append(
-                "No BOS/CHOCH resolved the liquidity interaction within the search window."
-                + (f" ({skipped_no_fvg} earlier structure event(s) skipped for having no FVG entry.)" if skipped_no_fvg else "")
+                "No market structure shift confirmed the bias within the search window."
+                + (f" ({'; '.join(reasons)}.)" if reasons else "")
             )
             return result
+
         if settings.require_choch_only and structure_event.structure_type is not structure_mod.StructureType.CHOCH:
-            result.status = TradeStatus.NO_SETUP
-            result.notes.append(
-                f"{structure_event.signal_label} resolved the liquidity interaction, but only CHOCH "
-                "setups are traded per config; setup rejected."
-            )
-            return result
+            # Explicit user spec: a BOS in the bias direction is not a trade,
+            # but it is not the end of the day either - "dont take trade wait
+            # mss". Step over it and keep scanning the same session for a
+            # genuine structure shift. The window strictly shrinks each pass,
+            # so this always terminates.
+            skipped_bos += 1
+            search_window = search_window[search_window.index > structure_event.ts]
+            if search_window.empty:
+                result.status = TradeStatus.NO_SETUP
+                result.notes.append(
+                    f"Session ended waiting for an MSS; {skipped_bos} BOS seen and skipped."
+                )
+                return result
+            continue
 
         # --- SMT divergence check (supportive by default, mandatory if configured) ---
         confirm_onward = confirm_1m[confirm_1m.index <= structure_event.ts] if not confirm_1m.empty else confirm_1m
@@ -178,6 +237,8 @@ def run_day(
     result.direction = structure_event.direction
     result.leg_candle_count = zones.leg_candle_count
     result.entry = entry
+    if skipped_bos:
+        result.notes.append(f"Waited through {skipped_bos} BOS before this MSS confirmed.")
     if skipped_no_fvg:
         result.notes.append(f"Took this BOS/CHOCH after skipping {skipped_no_fvg} earlier one(s) with no FVG entry.")
 

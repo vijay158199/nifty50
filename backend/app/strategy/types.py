@@ -18,8 +18,18 @@ class Direction(str, Enum):
 
 
 class TriggerType(str, Enum):
+    """How the day's bias was established. BREAKOUT/SWEEP come from the
+    first-candle liquidity model (breakout_sweep.py); the RSI_* members come
+    from the RSI model (rsi.py), selected by settings.bias_source. Values are
+    kept <= 16 chars to fit Trade.trigger_type's column."""
     BREAKOUT = "BREAKOUT"
     SWEEP = "SWEEP"
+    # "reversal" reading: RSI leaving an extreme (exhaustion).
+    RSI_OS_EXIT = "RSI_OS_EXIT"    # crossed back up through oversold -> bullish
+    RSI_OB_EXIT = "RSI_OB_EXIT"    # crossed back down through overbought -> bearish
+    # "momentum" reading: RSI driving into an extreme (strength).
+    RSI_OB_PUSH = "RSI_OB_PUSH"    # pushed up through overbought -> bullish
+    RSI_OS_PUSH = "RSI_OS_PUSH"    # pushed down through oversold -> bearish
 
 
 class LiquiditySide(str, Enum):
@@ -65,16 +75,27 @@ class SwingPoint:
 
 @dataclass
 class TriggerEvent:
-    """A liquidity interaction with one of the first 30-min candle's levels.
-    Deliberately carries NO trade direction - that's only knowable once 1m
-    structure shows whether price continues (BOS) or reverses (CHOCH), see
-    `structure.detect_bos_choch`."""
+    """Whatever established the day's bias - either a liquidity interaction
+    with the first candle's levels, or an RSI line break.
+
+    In the first-candle model this deliberately carries NO trade direction:
+    that's only knowable once 1m structure shows whether price continues
+    (BOS) or reverses (CHOCH), see `structure.detect_bos_choch`. The RSI
+    model does know a direction up front (`bias_direction`), but it still
+    only expresses it as the `liquidity_side` whose CHOCH resolves that way
+    - the structure stage remains the thing that confirms a trade.
+    """
     liquidity_side: LiquiditySide
-    trigger_type: TriggerType  # BREAKOUT | SWEEP - how that single interaction bar behaved, informational only
+    trigger_type: TriggerType
     trigger_time: dt.datetime
-    first_candle_high: float
-    first_candle_low: float
     trigger_candle_close: float
+    # First-candle model only - None when bias came from RSI.
+    first_candle_high: float | None = None
+    first_candle_low: float | None = None
+    # RSI model only - None when bias came from the first candle.
+    rsi_value: float | None = None
+    rsi_previous: float | None = None
+    bias_direction: Direction | None = None
 
 
 @dataclass

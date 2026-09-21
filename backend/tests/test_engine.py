@@ -94,6 +94,14 @@ def test_run_day_stops_at_first_no_entry_structure_by_default(monkeypatch):
     from app.strategy import engine
     from app.strategy.types import Direction, LiquiditySide, StructureEvent, StructureType, SwingPoint, TradeStatus
 
+    # These two tests exercise the skip_no_fvg loop, not the bias stage, and
+    # their fixture is built for find_trigger (a flat 1m series, which RSI
+    # reads as a dead-neutral 50 and never crosses anything). Pin the bias
+    # model they were written against, and the pre-2026-09-21 BOS handling,
+    # so they keep testing the one axis they are about.
+    monkeypatch.setattr(engine.settings, "bias_source", "FIRST_CANDLE")
+    monkeypatch.setattr(engine.settings, "require_choch_only", False)
+
     day = dt.date(2026, 1, 5)
     start = dt.datetime(2026, 1, 5, 9, 15)
     primary_30m, primary_1m = _triggering_30m_and_1m(start)
@@ -124,6 +132,14 @@ def test_run_day_skips_no_entry_structure_and_takes_the_next_one(monkeypatch):
     from app.strategy.types import (
         Direction, EntrySignal, EntryType, LiquiditySide, RiskPlan, StructureEvent, StructureType, SwingPoint, TradeStatus,
     )
+
+    # These two tests exercise the skip_no_fvg loop, not the bias stage, and
+    # their fixture is built for find_trigger (a flat 1m series, which RSI
+    # reads as a dead-neutral 50 and never crosses anything). Pin the bias
+    # model they were written against, and the pre-2026-09-21 BOS handling,
+    # so they keep testing the one axis they are about.
+    monkeypatch.setattr(engine.settings, "bias_source", "FIRST_CANDLE")
+    monkeypatch.setattr(engine.settings, "require_choch_only", False)
 
     day = dt.date(2026, 1, 5)
     start = dt.datetime(2026, 1, 5, 9, 15)
@@ -170,3 +186,83 @@ def test_run_day_skips_no_entry_structure_and_takes_the_next_one(monkeypatch):
     assert result.structure is second_event
     assert result.entry is not None and result.entry.entry_price == 102.0
     assert any("skipping 1" in n or "skipped 1" in n for n in result.notes)
+
+
+def test_run_day_waits_past_a_bos_for_a_later_mss(monkeypatch):
+    """Explicit user spec: "bos happening that time dont take trade wait
+    mss". A BOS must NOT end the day - the engine steps over it and keeps
+    scanning the same session for a genuine structure shift."""
+    from app.strategy import engine
+    from app.strategy.types import (
+        Direction, EntrySignal, EntryType, LiquiditySide, StructureEvent, StructureType, SwingPoint, TradeStatus,
+    )
+
+    monkeypatch.setattr(engine.settings, "bias_source", "FIRST_CANDLE")
+    monkeypatch.setattr(engine.settings, "require_choch_only", True)
+
+    day = dt.date(2026, 1, 5)
+    start = dt.datetime(2026, 1, 5, 9, 15)
+    primary_30m, primary_1m = _triggering_30m_and_1m(start)
+
+    bos = StructureEvent(
+        StructureType.BOS, Direction.SELL, LiquiditySide.LOW, primary_1m.index[5],
+        SwingPoint(primary_1m.index[0], 101.0, "low", 0),
+    )
+    mss = StructureEvent(
+        StructureType.CHOCH, Direction.BUY, LiquiditySide.LOW, primary_1m.index[20],
+        SwingPoint(primary_1m.index[15], 101.5, "high", 15),
+    )
+
+    def fake_detect(candles, *args, **kwargs):
+        return bos if candles.index[0] <= bos.ts else mss
+
+    class _FakeZones:
+        leg_high, leg_low, leg_candle_count = 103.0, 101.0, 4
+
+    monkeypatch.setattr(engine.structure_mod, "detect_bos_choch", fake_detect)
+    monkeypatch.setattr(engine.entries_mod, "build_entry_zones", lambda *a, **k: _FakeZones())
+    monkeypatch.setattr(
+        engine.entries_mod, "scan_for_entry",
+        lambda *a, **k: EntrySignal(EntryType.FAIR_VALUE_GAP, Direction.BUY, primary_1m.index[25], 102.0, "fvg"),
+    )
+
+    result = engine.run_day(day, primary_30m, primary_1m, primary_1m)
+
+    assert result.structure is mss
+    assert result.status is not TradeStatus.NO_SETUP
+    assert result.direction is Direction.BUY
+    assert any("BOS" in n for n in result.notes)
+
+
+def test_run_day_reports_no_setup_when_only_bos_ever_happens(monkeypatch):
+    """The other half of the same rule: waiting for an MSS that never comes
+    is a no-trade day, not a BOS trade taken as a consolation prize."""
+    from app.strategy import engine
+    from app.strategy.types import (
+        Direction, LiquiditySide, StructureEvent, StructureType, SwingPoint, TradeStatus,
+    )
+
+    monkeypatch.setattr(engine.settings, "bias_source", "FIRST_CANDLE")
+    monkeypatch.setattr(engine.settings, "require_choch_only", True)
+
+    day = dt.date(2026, 1, 5)
+    start = dt.datetime(2026, 1, 5, 9, 15)
+    primary_30m, primary_1m = _triggering_30m_and_1m(start)
+
+    def fake_detect(candles, *args, **kwargs):
+        # A fresh BOS every pass, always one bar into whatever window it gets.
+        if len(candles) < 2:
+            return None
+        return StructureEvent(
+            StructureType.BOS, Direction.SELL, LiquiditySide.LOW, candles.index[1],
+            SwingPoint(candles.index[0], 101.0, "low", 0),
+        )
+
+    monkeypatch.setattr(engine.structure_mod, "detect_bos_choch", fake_detect)
+
+    result = engine.run_day(day, primary_30m, primary_1m, primary_1m)
+
+    assert result.status is TradeStatus.NO_SETUP
+    assert result.entry is None
+    # It must terminate rather than spin on a window that never shrinks.
+    assert any("MSS" in n for n in result.notes)
