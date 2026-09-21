@@ -1,7 +1,7 @@
 # NIFTY 50 ICT/SMC Intraday Strategy System
 
-A local Python + web application implementing the **First 30-Minute Breakout / Liquidity Sweep** ICT/SMC
-strategy on NIFTY 50, with BANKNIFTY used for SMT divergence confirmation. It runs a live signal
+A local Python + web application implementing an **RSI bias + Market Structure Shift** ICT/SMC strategy
+on NIFTY 50, with BANKNIFTY used for SMT divergence confirmation. It runs a live signal
 monitor during market hours, a historical backtester, and a dashboard - all on your own machine.
 
 **Signal generation never places real broker orders on its own.** Connecting a broker account (Broker
@@ -9,16 +9,24 @@ page) is opt-in and only ever places an order when you submit one yourself.
 
 ## Strategy Recap
 
-1. Capture the first 30-minute candle of the session (09:15-09:45 IST), built from 1-minute (or 5-minute
-   fallback) data resampled ourselves - see "Data source & its limits" below for why.
-2. Find the first subsequent 30-minute candle that breaks out of, or sweeps the liquidity of, that first candle.
-3. Switch to the 1-minute chart and look for a Market Structure Shift / Change of Character / Break of
-   Structure in the trigger's direction, plus an SMT divergence check against BANKNIFTY.
-4. Time the entry with a Fair Value Gap retracement to its 50% (CE) level or deeper (other concepts -
+1. **Bias** from RSI on the 1-minute chart, from 09:30 onward (`bias_source="RSI"`). Two readings of
+   "RSI breaking the top/bottom line" are implemented, because they are genuinely different strategies:
+   - `rsi_bias_mode="reversal"` (default) - RSI crossing back **up** through the oversold line is buying
+     pressure (exhaustion), and back **down** through overbought is selling pressure.
+   - `rsi_bias_mode="momentum"` - RSI pushing **up** through overbought is buying pressure (strength).
+
+   These produce opposite trades on the same chart and are never blended. Backtest both over the same
+   window to settle which one you mean. The original first-candle liquidity-sweep model is still
+   available as `bias_source="FIRST_CANDLE"`.
+2. Switch to 1-minute market structure and wait for a **market structure shift** (CHOCH) in the bias
+   direction, with an SMT divergence check against BANKNIFTY. A plain BOS is **not** a trade: by default
+   (`require_choch_only=True`) the engine steps over it and keeps scanning the same session for a real
+   MSS, rather than ending the day.
+3. Time the entry with a Fair Value Gap retracement to its 50% (CE) level or deeper (other concepts -
    CISD / Order Block / Breaker Block / Golden Ratio - are still implemented and can be re-enabled via
    `entry_priority`, but aren't used by default - they underperformed in testing).
-5. Fixed risk: 15-point stop, 30-point target (1:2 R:R), with position size derived from your configured
-   capital and risk-per-trade percentage.
+4. Stop at the displacement leg's own origin swing, target at 2x that distance (1:2 R:R), with position
+   size derived from your configured capital and risk-per-trade percentage.
 
 See `docs` inline in `backend/app/strategy/*.py` for how each concept is implemented - every module has a
 short docstring explaining the exact rule it applies.
@@ -28,7 +36,7 @@ short docstring explaining the exact rule it applies.
 ```
 backend/app/
   config.py        # all tunables (capital, risk %, SL/TP points, lot size, priorities, etc.)
-  data/            # yfinance fetch + local SQLite candle cache + NSE trading calendar + 30m resampling
+  data/            # Upstox fetch + local SQLite candle cache + NSE trading calendar + 30m resampling
   strategy/        # the strategy engine (swings, structure, SMT, entries, risk, orchestration)
   models/          # SQLAlchemy schema + DB session helper
   backtest/        # replays the engine over a date range, computes stats, writes the Excel workbook
@@ -88,14 +96,33 @@ cd backend
 ..\venv\Scripts\python -m pytest -v
 ```
 
-31 tests cover swing/fractal detection, breakout & liquidity-sweep detection, MSS/CHOCH/BOS structure
+71 tests cover RSI calculation and bias detection, the Upstox client's parsing/paging, swing/fractal
+detection, breakout & liquidity-sweep detection, MSS/CHOCH/BOS structure
 logic, SMT divergence, all four entry-timing concepts (with hand-verified synthetic fixtures), position
 sizing/risk math, and the backtest statistics engine.
 
-## Data Source & Its Limits (important)
+## Data Source
 
-Historical/live candles come from **Yahoo Finance via `yfinance`** - no broker account or API key needed.
-Two things worth knowing:
+Candles come from the **Upstox API v3** (`data_provider="upstox"`), which serves 1-minute data from
+**January 2022** - so a 1-minute strategy can be backtested over years rather than the trailing few
+weeks. Requests are paged a month at a time (the endpoint's cap), and today's session comes from the
+intraday endpoint since the historical one excludes it.
+
+**Set up the token before first run.** Generate an **Analytics Token** from the Upstox developer console
+and set it as `NIFTY_UPSTOX_ACCESS_TOKEN`. Use that, not a standard access token: a standard one expires
+at **3:30 AM IST every day** with no refresh mechanism, which would mean a manual browser login before
+every session. The Analytics Token is valid for a year, needs no OAuth redirect, and is read-only -
+which is all this system needs, since it never places an order through Upstox.
+
+Instrument keys are mapped from the old Yahoo tickers in `settings.upstox_instrument_keys`
+(`^NSEI` -> `NSE_INDEX|Nifty 50`), so cached candles and symbol ids elsewhere in the app are unchanged.
+If a fetch 404s, re-check those keys against Upstox's daily instrument master - the exact spelling of
+index keys has changed before.
+
+### The old Yahoo path (`data_provider="yfinance"`)
+
+Kept selectable so runs cached under it stay reproducible. Its limits are why it is no longer the
+default:
 
 - **Yahoo only serves 1-minute candles for the trailing ~30 days**, and 5-minute candles for ~60 days.
   Once a day has been fetched once, it's cached locally in SQLite and stays available even after Yahoo's

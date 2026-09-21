@@ -1,13 +1,18 @@
-"""yfinance wrapper: fetch OHLC candles with retry/backoff, normalize to IST
-naive timestamps, and transparently merge with the local cache.
+"""Candle fetching: pull OHLC from the configured provider with
+retry/backoff, normalize to IST naive timestamps, and transparently merge
+with the local cache.
 
-Known Yahoo/yfinance limitation (documented for the user, not hidden):
-- interval="1m"  -> only the trailing ~30 days are available
-- interval="5m"/"30m" -> only the trailing ~60 days are available
-- there is no native "3m" interval - it's derived by resampling 1m data
-  (see get_session_data), so it shares 1m's ~30-day window, not 5m's ~60.
-Once a day has been fetched and cached, it remains available locally even
-after Yahoo's rolling window moves past it.
+Provider is `settings.data_provider`:
+
+- **upstox** (default) - 1-minute candles from January 2022, so a 1m
+  strategy can be backtested over years. See app/data/upstox.py.
+- **yfinance** - kept selectable so runs cached under it stay reproducible.
+  Its limits, which are why it is no longer the default: 1m only for the
+  trailing ~30 days, 5m/30m for ~60, and no native 3m (derived by
+  resampling 1m, so it inherits 1m's window).
+
+Either way, once a day has been fetched and cached it remains available
+locally even after the provider's own window moves past it.
 """
 from __future__ import annotations
 
@@ -20,6 +25,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 from app.config import settings
 from app.data import cache
+from app.data import upstox as upstox_mod
 from app.data.calendar import IST, session_bounds
 from app.data.resample import resample_ohlc
 from app.models.db import log_event
@@ -58,6 +64,8 @@ def _normalize_index(df: pd.DataFrame) -> pd.DataFrame:
     reraise=True,
 )
 def _download(symbol: str, interval: str, start: dt.datetime, end: dt.datetime) -> pd.DataFrame:
+    """Yahoo path. Upstox has its own retry/paging, so it does not come
+    through here - see _download_upstox."""
     df = yf.download(
         symbol,
         interval=interval,
@@ -70,32 +78,69 @@ def _download(symbol: str, interval: str, start: dt.datetime, end: dt.datetime) 
     return _normalize_index(df)
 
 
-def fetch_and_cache(symbol: str, interval: str, start: dt.datetime, end: dt.datetime) -> pd.DataFrame:
-    """Fetch a range from Yahoo (clamped to what it can actually serve),
-    persist to cache, and return the merged cached view for the full
-    requested range."""
-    today = dt.datetime.now(IST).date()
-    max_lookback = _MAX_LOOKBACK_DAYS.get(interval, 30)
-    earliest_fetchable = today - dt.timedelta(days=max_lookback - 1)
+def _download_upstox(symbol: str, interval: str, start: dt.datetime, end: dt.datetime) -> pd.DataFrame:
+    instrument_key = settings.upstox_instrument_keys.get(symbol)
+    if instrument_key is None:
+        raise upstox_mod.UpstoxError(
+            f"No Upstox instrument key mapped for {symbol!r}. Add one to "
+            "settings.upstox_instrument_keys."
+        )
+    return upstox_mod.fetch_candles(
+        instrument_key,
+        INTERVAL_MINUTES.get(interval, 1),
+        start,
+        end,
+        today=dt.datetime.now(IST).date(),
+    )
 
-    fetch_start = max(start.date(), earliest_fetchable)
+
+def _using_upstox() -> bool:
+    return settings.data_provider.lower() == "upstox"
+
+
+def earliest_fetchable_date(interval: str, today: dt.date) -> dt.date:
+    """The oldest date the configured provider can still serve for this
+    interval. Upstox's 1m history is anchored to a fixed start date; Yahoo's
+    is a rolling window measured back from today."""
+    if _using_upstox():
+        return upstox_mod.EARLIEST_1M_DATE
+    return today - dt.timedelta(days=_MAX_LOOKBACK_DAYS.get(interval, 30) - 1)
+
+
+def fetch_and_cache(symbol: str, interval: str, start: dt.datetime, end: dt.datetime) -> pd.DataFrame:
+    """Fetch a range from the configured provider (clamped to what it can
+    actually serve), persist to cache, and return the merged cached view for
+    the full requested range. A failed fetch is logged, not raised - the
+    cached view is still returned so a provider outage degrades rather than
+    breaks the dashboard."""
+    today = dt.datetime.now(IST).date()
+    fetch_start = max(start.date(), earliest_fetchable_date(interval, today))
     fetch_end = end.date()
 
     if fetch_start <= fetch_end:
+        provider = "upstox" if _using_upstox() else "yfinance"
         try:
-            fresh = _download(
-                symbol,
-                interval,
-                dt.datetime.combine(fetch_start, dt.time.min),
-                dt.datetime.combine(fetch_end + dt.timedelta(days=1), dt.time.min),
-            )
+            if _using_upstox():
+                fresh = _download_upstox(
+                    symbol,
+                    interval,
+                    dt.datetime.combine(fetch_start, dt.time.min),
+                    dt.datetime.combine(fetch_end, dt.time.max),
+                )
+            else:
+                fresh = _download(
+                    symbol,
+                    interval,
+                    dt.datetime.combine(fetch_start, dt.time.min),
+                    dt.datetime.combine(fetch_end + dt.timedelta(days=1), dt.time.min),
+                )
             if not fresh.empty:
                 cache.store_candles(symbol, interval, fresh)
         except Exception as exc:  # noqa: BLE001 - log and fall back to cache
             log_event(
                 "ERROR",
                 "data.fetcher",
-                f"yfinance fetch failed for {symbol} {interval} "
+                f"{provider} fetch failed for {symbol} {interval} "
                 f"[{fetch_start}..{fetch_end}]: {exc}",
             )
 
@@ -140,8 +185,13 @@ def get_session_data(symbol: str, date: dt.date, structure_interval: str | None 
         reduced = False
         native_interval = "5m"
     else:
-        # every other interval needs native 1m data as its base
-        reduced = (today - date).days >= settings.yfinance_1m_lookback_days
+        # every other interval needs native 1m data as its base. Upstox
+        # serves 1m all the way back to 2022, so there is nothing to reduce
+        # to unless the date predates that entirely.
+        if _using_upstox():
+            reduced = date < upstox_mod.EARLIEST_1M_DATE
+        else:
+            reduced = (today - date).days >= settings.yfinance_1m_lookback_days
         native_interval = "5m" if reduced else "1m"
 
     base = get_candles(symbol, native_interval, start, end)

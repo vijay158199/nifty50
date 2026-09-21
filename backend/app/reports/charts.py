@@ -177,6 +177,10 @@ def _annotate_liquidity(ax, result: TradeResult) -> None:
     trigger = result.trigger
     if trigger is None:
         return
+    # An RSI-sourced bias has no first-candle band to shade - there is no
+    # liquidity range involved, so there is simply nothing to draw here.
+    if trigger.first_candle_low is None or trigger.first_candle_high is None:
+        return
     ax.axhspan(trigger.first_candle_low, trigger.first_candle_high, color=_LIQUIDITY, alpha=0.10, zorder=0)
 
 
@@ -193,7 +197,13 @@ def _annotate_levels(fig, ax, result: TradeResult) -> None:
 
     caption_parts: list[str] = []
     if trigger is not None:
-        caption_parts.append(f"{settings.first_candle_minutes}m Liq {trigger.first_candle_low:,.1f}-{trigger.first_candle_high:,.1f}")
+        if trigger.first_candle_low is not None and trigger.first_candle_high is not None:
+            caption_parts.append(
+                f"{settings.first_candle_minutes}m Liq "
+                f"{trigger.first_candle_low:,.1f}-{trigger.first_candle_high:,.1f}"
+            )
+        elif trigger.rsi_value is not None:
+            caption_parts.append(f"RSI({settings.rsi_period}) {trigger.rsi_value:,.1f}")
 
     items: list[tuple[str, float, str]] = []
     if structure is not None:
